@@ -18,7 +18,7 @@ print(f"Pinging actuator ID {ACTUATOR_ID}...")
 result = bear.ping(ACTUATOR_ID)
 print(f"Ping result: {result}")
 
-temp, err = bear.get_present_temperature(ACTUATOR_ID,)[0]
+temp, err = bear.get_winding_temperature(ACTUATOR_ID,)[0]
 pos, err = bear.get_present_position(ACTUATOR_ID,)[0]
 
 print(f"Temperature: {temp[0]:.1f} C")
