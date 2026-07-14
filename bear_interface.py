@@ -42,10 +42,10 @@ class BearInterface:
         Read-only. Does not require torque_enable and carries none of the
         risk enable()/set_iq() do — safe to call regardless of ESTOP status.
         """
-        pos, _ = self.bear.get_present_position((self.id,))
-        vel, _ = self.bear.get_present_velocity((self.id,))
-        iq, _ = self.bear.get_present_iq((self.id,))
-        temp, _ = self.bear.get_present_temperature((self.id,))
+        pos, _ = self.bear.get_present_position(self.id)[0]
+        vel, _ = self.bear.get_present_velocity(self.id)[0]
+        iq, _ = self.bear.get_present_iq(self.id)[0]
+        temp, _ = self.bear.get_winding_temperature(self.id)[0]
         return {
             'position': pos[0],
             'velocity': vel[0],
