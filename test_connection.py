@@ -20,7 +20,9 @@ print(f"Ping result: {result}")
 
 temp, err = bear.get_winding_temperature(ACTUATOR_ID,)[0]
 pos, err = bear.get_present_position(ACTUATOR_ID,)[0]
-
-print(f"Temperature: {temp[0]:.1f} C")
-print(f"Position:    {pos[0]:.4f} rad")
+if temp[0] is None or pos[0] is None:
+    print("Read timed out (got None) — check actuator power/LED before debugging further.")
+else:
+    print(f"Temperature: {temp[0]:.1f} C")
+    print(f"Position:    {pos[0]:.4f} rad")
 print("Connection OK. No torque was commanded — this script never enables the actuator.")
