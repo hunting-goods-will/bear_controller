@@ -26,3 +26,5 @@ else:
     print(f"Temperature: {temp[0]:.1f} C")
     print(f"Position:    {pos[0]:.4f} rad")
 print("Connection OK. No torque was commanded — this script never enables the actuator.")
+
+

@@ -24,7 +24,7 @@ try:
     iface.enable()
 
     # 2. Command a small torque
-    iface.set_iq(0.15)
+    iface.set_iq(0.45)
 
     # 3. monitoring loop
     for i in range(10):
