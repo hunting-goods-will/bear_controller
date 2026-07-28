@@ -1,9 +1,12 @@
 # First motion test for Panda BEAR Westwood Actuator
 from bear_interface import BearInterface
 import time
+from config import COMM_TIMEOUT, COMM_TRY_NUM
 
 iface = BearInterface()   # reuses your tested connection code
 
+iface.bear.single_timeout = COMM_TIMEOUT
+iface.bear.single_try_num = COMM_TRY_NUM
 # set_p_gain_iq:
 iface.bear.set_p_gain_iq((iface.id, 0.02))
 iface.bear.set_i_gain_iq((iface.id, 0.02))
@@ -17,14 +20,14 @@ iface.bear.set_i_gain_id((iface.id, 0.02))
 iface.bear.set_d_gain_id((iface.id, 0))
 
 # Limit Max I
-iface.bear.set_limit_i_max((iface.id, 0.5))
+iface.bear.set_limit_i_max((iface.id, 0.6))
 
 try:
     # 1. Enable the actuator
     iface.enable()
 
     # 2. Command a small torque
-    iface.set_iq(0.45)
+    iface.set_iq(0.5)
 
     # 3. monitoring loop
     for i in range(10):

@@ -6,21 +6,11 @@ class BearInterface:
     def __init__(self):
         self.bear = Manager.BEAR(port=PORT, baudrate=BAUDRATE)
         self.id = ACTUATOR_ID
+        self.bear.single_timeout = COMM_TIMEOUT
+        self.bear.single_try_num = COMM_TRY_NUM
 
     def enable(self):
-        """Set torque/IQ mode and enable the actuator.
-
-        Two very different things can happen when you call this, and you
-        currently don't know which one you'll get:
-          - If ESTOP is floating (unwired), the actuator's own firmware
-            keeps it latched in ESTOP status and this silently has no
-            effect, regardless of what the code does.
-          - If ESTOP is jumpered to signal ground, this WILL succeed and
-            the actuator WILL take torque commands, with zero E-STOP
-            protection — the manual's explicitly-not-recommended minimum
-            configuration.
-        Do not call this until you know which case you're in.
-        """
+        # Set torque/IQ mode and enable the actuator.
         self.bear.set_mode((self.id, 0))  # 0 = torque/IQ mode
         self.bear.set_torque_enable((self.id, 1))
         print("Actuator enabled.")
@@ -54,7 +44,7 @@ class BearInterface:
         }
 
     def thermal_scale(self, iq_command):
-        """Gracefully reduce torque as temperature rises. Never hard-cut."""
+        """ Reduce torque as temperature rises. Never hard-cut."""
         temp = self.get_state()['temp']
         if temp < TEMP_WARN:
             return iq_command
@@ -65,17 +55,10 @@ class BearInterface:
         return iq_command * scale
 
     def configure_watchdog(self, timeout_ms):
-        """Arms the firmware watchdog timeout register.
+        """Arms the firmware watchdog timeout register. """
 
-        NOT wired up yet, on purpose. The exact register name/units for
-        your firmware version haven't been confirmed against the SDK
-        manual in this project yet — I'm not guessing a PyBEAR method name
-        here, since a wrong-but-plausible-looking call is worse than an
-        explicit stop sign. Fill this in once you and your PI have picked
-        a real timeout value and you've confirmed the register call in the
-        manual.
-        """
         raise NotImplementedError(
+
             "Watchdog register/method not yet confirmed against the SDK "
             "manual — fill in before use, don't guess."
         )

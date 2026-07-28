@@ -1,8 +1,10 @@
 # Actuator settings
 
 ACTUATOR_ID = 1
-PORT        = '/dev/UB0114'   # udev rule
+PORT        = '/dev/ttyUSB0'   # udev rule
 BAUDRATE    = 8000000
+COMM_TIMEOUT  = 0.006
+COMM_TRY_NUM  = 3
 
 # Safety limits 
 MAX_IQ      = 1.0    # Amps — absolute maximum current command 

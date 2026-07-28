@@ -4,7 +4,7 @@ Simple script to set ID for BEAR
 
 from pybear import Manager
 
-bear = Manager.BEAR(port="/dev/UB0114", baudrate=8000000)
+bear = Manager.BEAR(port="/dev/ttyUSB0", baudrate=8000000)
 m_id = int(input("Enter the present ID and press enter: "))
 print("Present ID entered is %02d." % m_id)
 if bear.ping(m_id)[0][1] is not None:

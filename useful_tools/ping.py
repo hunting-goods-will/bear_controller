@@ -7,7 +7,7 @@ Search for available BEARs
 from pybear import Manager
 
 # Define port and baud rate
-bear_port = "/dev/UB0114"
+bear_port = "/dev/ttyUSB0"
 bear_baudrate = 8000000
 # Define ID search range
 id_range = range(0, 9)
@@ -28,3 +28,4 @@ if found:
     print(bear_list)
 else:
     print("Search done. No BEAR found.")
+

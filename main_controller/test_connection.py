@@ -2,10 +2,12 @@
 Read-only connectivity check.
 """
 from pybear import Manager
-from config import PORT, BAUDRATE, ACTUATOR_ID
+from config import PORT, BAUDRATE, ACTUATOR_ID, COMM_TIMEOUT, COMM_TRY_NUM
 
 print(f"Connecting to port {PORT}...")
 bear = Manager.BEAR(port=PORT, baudrate=BAUDRATE)
+bear.single_timeout = COMM_TIMEOUT
+bear.single_try_num = COMM_TRY_NUM
 
 print(f"Pinging actuator ID {ACTUATOR_ID}...")
 result = bear.ping(ACTUATOR_ID)
