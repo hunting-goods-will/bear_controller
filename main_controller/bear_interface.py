@@ -1,5 +1,5 @@
 from pybear import Manager
-from config import *
+from main_controller.config import *
 
 
 class BearInterface:

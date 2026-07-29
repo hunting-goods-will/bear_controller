@@ -1,5 +1,5 @@
-from controller import AssistController
-from config import SAFETY_CHECKS_CONFIRMED
+from main_controller.controller import AssistController
+from main_controller.config import SAFETY_CHECKS_CONFIRMED
 
 if __name__ == "__main__":
     if not SAFETY_CHECKS_CONFIRMED:

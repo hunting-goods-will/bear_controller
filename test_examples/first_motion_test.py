@@ -1,7 +1,7 @@
 # First motion test for Panda BEAR Westwood Actuator
-from bear_interface import BearInterface
+from main_controller.bear_interface import BearInterface
 import time
-from config import COMM_TIMEOUT, COMM_TRY_NUM
+from main_controller.config import COMM_TIMEOUT, COMM_TRY_NUM
 
 iface = BearInterface()   # reuses your tested connection code
 

@@ -3,7 +3,7 @@
 ACTUATOR_ID = 1
 PORT        = '/dev/ttyUSB0'   # udev rule
 BAUDRATE    = 8000000
-COMM_TIMEOUT  = 0.006
+COMM_TIMEOUT  = 0.002
 COMM_TRY_NUM  = 3
 
 # Safety limits 

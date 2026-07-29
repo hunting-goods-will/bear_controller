@@ -1,4 +1,4 @@
-from bear_interface import BearInterface
+from main_controller.bear_interface import BearInterface
 
 # PLACEHOLDER VALUES — do not tune these yourself, they're not a design,
 # they're a stand-in so the file has valid syntax. Still open with your PI:

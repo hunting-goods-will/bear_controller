@@ -2,7 +2,7 @@
 Read-only connectivity check.
 """
 from pybear import Manager
-from config import PORT, BAUDRATE, ACTUATOR_ID, COMM_TIMEOUT, COMM_TRY_NUM
+from main_controller.config import PORT, BAUDRATE, ACTUATOR_ID, COMM_TIMEOUT, COMM_TRY_NUM
 
 print(f"Connecting to port {PORT}...")
 bear = Manager.BEAR(port=PORT, baudrate=BAUDRATE)

@@ -1,4 +1,4 @@
-from bear_interface import BearInterface
+from main_controller.bear_interface import BearInterface
 from datetime import datetime
 import os
 import time
