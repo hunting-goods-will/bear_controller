@@ -1,6 +1,6 @@
 # measure_latency.py
 from pybear import Manager
-from config import PORT, BAUDRATE
+from main_controller.config import PORT, BAUDRATE
 import time
 
 bear = Manager.BEAR(port=PORT, baudrate=BAUDRATE)

@@ -43,6 +43,20 @@ class BearInterface:
             'temp': temp[0]
         }
 
+    def joint_limit_scale(self, iq_command):
+        """Zero torque at/beyond MIN_ANGLE/MAX_ANGLE. Stays enabled and
+        backdrivable rather than disabling — resumes automatically once
+        position is back in range. Separate from the stricter abort-and-
+        disable behavior the characterization sweep script needs
+        (NEXT_STEPS_v2.md §5).
+        """
+        position = self.get_state()['position']
+        if position <= MIN_ANGLE or position >= MAX_ANGLE:
+            print(f"WARNING: position {position:.3f} rad at/beyond joint "
+                  f"limit. Zeroing torque.")
+            return 0.0
+        return iq_command
+
     def thermal_scale(self, iq_command):
         """ Reduce torque as temperature rises. Never hard-cut."""
         temp = self.get_state()['temp']
