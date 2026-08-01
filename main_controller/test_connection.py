@@ -2,6 +2,7 @@
 Read-only connectivity check.
 """
 from pybear import Manager
+from main_controller.bear_interface import BearInterface
 from main_controller.config import PORT, BAUDRATE, ACTUATOR_ID, COMM_TIMEOUT, COMM_TRY_NUM
 
 print(f"Connecting to port {PORT}...")
@@ -22,4 +23,7 @@ else:
     print(f"Position:    {pos[0]:.4f} rad")
 print("Connection OK. No torque was commanded — this script never enables the actuator.")
 
+iface = BearInterface()
+limit, err = iface.bear.get_limit_i_max(iface.id)[0]
+print(f"limit_i_max: {limit[0]} A")
 

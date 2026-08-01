@@ -14,6 +14,15 @@ class BearInterface:
         self.bear.set_mode((self.id, 0))  # 0 = torque/IQ mode
         self.bear.set_torque_enable((self.id, 1))
         print("Actuator enabled.")
+    
+    def enable_position_mode(self, initial_position):
+        """Set mode to Position (2) and enable, with goal_position pre-set
+        to initial_position first so nothing lurches — a mode change while
+        enabled acts on the new mode's goal register immediately."""
+        self.bear.set_goal_position((self.id, initial_position))
+        self.bear.set_mode((self.id, 2))
+        self.bear.set_torque_enable((self.id, 1))
+        print("Actuator enabled in Position Mode.")
 
     def disable(self):
         """Zero torque and disable. Always call this on shutdown."""
@@ -22,9 +31,13 @@ class BearInterface:
         print("Actuator disabled.")
 
     def set_iq(self, iq):
-        """Command a torque (current in Amps). Hard-clamped to MAX_IQ."""
+        """Command a torque (current in Amps). Hard-clamped to MAX_IQ.
+        Returns the actually-applied (clamped) value — always track this,
+        not your own running total, or you'll silently diverge from
+        what the hardware is really doing once you hit the clamp."""
         iq = max(-MAX_IQ, min(MAX_IQ, iq))
         self.bear.set_goal_iq((self.id, iq))
+        return iq
 
     def get_state(self):
         """Read position, velocity, IQ, and temperature in one call.
