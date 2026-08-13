@@ -1,0 +1,1 @@
+ the new current homing offset is -19.9935, implied raw encoder values is 19.9935 at the bottom of the postiion, Then again at the top position we have an implied raw encoder value of 22.0341 rad and a present position of 2.0406 rad

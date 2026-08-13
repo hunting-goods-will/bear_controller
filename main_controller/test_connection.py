@@ -23,7 +23,6 @@ else:
     print(f"Position:    {pos[0]:.4f} rad")
 print("Connection OK. No torque was commanded — this script never enables the actuator.")
 
-iface = BearInterface()
-limit, err = iface.bear.get_limit_i_max(iface.id)[0]
+limit, err = bear.get_limit_i_max(ACTUATOR_ID)[0]
 print(f"limit_i_max: {limit[0]} A")
 

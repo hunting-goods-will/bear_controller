@@ -1,6 +1,5 @@
 """
-Position-Mode spring characterization sweep.
-[docstring unchanged from before]
+FINAL Position-Mode spring characterization sweep.
 """
 import csv
 import math
@@ -8,9 +7,7 @@ import os
 import time
 
 from main_controller.bear_interface import BearInterface
-from main_controller.config import MAX_ANGLE, LOG_DIR, SAFETY_CHECKS_CONFIRMED, TEMP_WARN, TEMP_MAX
-
-MIN_SEARCH_ANGLE = math.radians(5)
+from main_controller.config import MIN_ANGLE, MAX_ANGLE, LOG_DIR, SAFETY_CHECKS_CONFIRMED, TEMP_WARN, TEMP_MAX
 
 IQ_ID_P, IQ_ID_I, IQ_ID_D = 0.02, 0.02, 0.0
 VEL_P, VEL_I, VEL_D = 4.5, 0.001, 0.0
@@ -38,61 +35,83 @@ if not SAFETY_CHECKS_CONFIRMED:
 
 os.makedirs(LOG_DIR, exist_ok=True)
 log_path = os.path.join(
-    LOG_DIR, f"position_sweep_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    LOG_DIR, f"position_sweep_FINAL_{time.strftime('%Y%m%d_%H%M%S')}.csv"
 )
 
 iface = BearInterface()
 
 
 def read_state():
+    """Returns dict: position, velocity, iq, id_current, input_voltage,
+    winding_temp, powerstage_temp, error."""
     pos, err = iface.bear.get_present_position(iface.id)[0]
     vel, _ = iface.bear.get_present_velocity(iface.id)[0]
     iq, _ = iface.bear.get_present_iq(iface.id)[0]
-    return pos[0], vel[0], iq[0], err
+    id_current, _ = iface.bear.get_present_id(iface.id)[0]
+    voltage, _ = iface.bear.get_input_voltage(iface.id)[0]
+    w_temp, _ = iface.bear.get_winding_temperature(iface.id)[0]
+    p_temp, _ = iface.bear.get_powerstage_temperature(iface.id)[0]
+    return {
+        'position': pos[0], 'velocity': vel[0], 'iq': iq[0],
+        'id': id_current[0], 'voltage': voltage[0],
+        'winding_temp': w_temp[0], 'powerstage_temp': p_temp[0],
+        'error': err,
+    }
 
 
-def thermal_limit_scale():
-    temp, _ = iface.bear.get_winding_temperature(iface.id)[0]
-    temperature = temp[0]
-    if temperature is None:
-        return None, LIMIT_I_MAX
-    if temperature < TEMP_WARN:
+def thermal_limit_scale(state):
+    w, p = state['winding_temp'], state['powerstage_temp']
+    if w is None or p is None:
+        return LIMIT_I_MAX
+    effective = max(w, p)   # matches the firmware's own fault logic
+    if effective < TEMP_WARN:
         scaled = LIMIT_I_MAX
-    elif temperature >= TEMP_MAX:
+    elif effective >= TEMP_MAX:
         scaled = 0.0
-        print(f"WARNING: winding temp {temperature:.1f}C at/above TEMP_MAX. limit_i_max -> 0.")
+        print(f"WARNING: effective temp {effective:.1f}C at/above TEMP_MAX. limit_i_max -> 0.")
     else:
-        scale = 1.0 - (temperature - TEMP_WARN) / (TEMP_MAX - TEMP_WARN)
-        scaled = LIMIT_I_MAX * scale
+        scaled = LIMIT_I_MAX * (1.0 - (effective - TEMP_WARN) / (TEMP_MAX - TEMP_WARN))
     iface.bear.set_limit_i_max((iface.id, scaled))
-    return temperature, scaled
+    return scaled
 
 
 def check_limits_and_abort(position):
-    if position <= MIN_SEARCH_ANGLE or position >= MAX_ANGLE:
+    if position <= MIN_ANGLE or position >= MAX_ANGLE:
         iface.disable()
-        raise RuntimeError(f"Position {position:.3f} rad crossed the software bound.")
+        raise RuntimeError(f"Position {position:.3f} rad crossed the finalized joint limit.")
+
+
+def log_row(writer, f, target, state, iq_hold_avg, peak_ramp_iq, at_target):
+    writer.writerow([
+        time.time(), f"{target:.4f}", f"{math.degrees(target):.2f}",
+        f"{state['position']:.4f}", f"{math.degrees(state['position']):.2f}",
+        f"{iq_hold_avg:.4f}", f"{peak_ramp_iq:.4f}",
+        f"{state['id']:.4f}", f"{state['voltage']:.2f}",
+        f"{state['winding_temp']:.1f}", f"{state['powerstage_temp']:.1f}",
+        at_target,
+    ])
+    f.flush()
 
 
 try:
-    pos, err = iface.bear.get_present_position(iface.id)[0]
-    start_position = pos[0]
+    state = read_state()
+    start_position = state['position']
     if start_position is None:
         raise SystemExit("Could not read starting position — check connection first.")
-    print(f"Starting position: {start_position:.4f} rad  (error byte: {err})")
+    print(f"Starting position: {start_position:.4f} rad ({math.degrees(start_position):.1f} deg)  "
+          f"error: {state['error']}")
 
-    if start_position <= MIN_SEARCH_ANGLE or start_position >= MAX_ANGLE:
+    if start_position <= MIN_ANGLE or start_position >= MAX_ANGLE:
         raise SystemExit(
-            f"Starting position {start_position:.4f} rad is outside "
-            f"[{MIN_SEARCH_ANGLE:.4f}, {MAX_ANGLE:.4f}] — reposition by hand first."
+            f"Starting position outside [{MIN_ANGLE:.4f}, {MAX_ANGLE:.4f}] rad — reposition by hand first."
         )
 
     sweep_end = float(input(
         f"Sweep to which end target, in rad? (current: {start_position:.4f}, "
-        f"valid range [{MIN_SEARCH_ANGLE:.4f}, {MAX_ANGLE:.4f}]): "
+        f"valid range [{MIN_ANGLE:.4f}, {MAX_ANGLE:.4f}]): "
     ))
-    if sweep_end <= MIN_SEARCH_ANGLE or sweep_end >= MAX_ANGLE:
-        raise SystemExit(f"Target {sweep_end:.4f} rad is outside the allowed range. Nothing enabled.")
+    if sweep_end <= MIN_ANGLE or sweep_end >= MAX_ANGLE:
+        raise SystemExit(f"Target {sweep_end:.4f} rad is outside the finalized range. Nothing enabled.")
 
     direction = 1 if sweep_end > start_position else -1
     num_targets = max(1, int(abs(sweep_end - start_position) / SWEEP_STEP))
@@ -117,101 +136,107 @@ try:
     iface.bear.set_limit_i_max((iface.id, LIMIT_I_MAX))
     iface.bear.set_limit_velocity_max((iface.id, LIMIT_VELOCITY_MAX))
     iface.bear.set_limit_acc_max((iface.id, LIMIT_ACC_MAX))
-    iface.bear.set_limit_position_min((iface.id, MIN_SEARCH_ANGLE))
+    iface.bear.set_limit_position_min((iface.id, MIN_ANGLE))
     iface.bear.set_limit_position_max((iface.id, MAX_ANGLE))
 
-    input(f"About to enable and sweep {len(targets)} target(s). Keep a hand near "
-          f"the arm, ready to Ctrl+C. Press Enter to proceed: ")
+    input(f"About to enable and sweep {len(targets)} target(s) across the FINALIZED range. "
+          f"Keep a hand near the arm, ready to Ctrl+C. Press Enter to proceed: ")
 
     iface.enable_position_mode(start_position)
 
     with open(log_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['timestamp', 'target_rad', 'angle_rad', 'iq_hold_A',
-                          'temperature_C', 'reached_target'])
+        writer.writerow(['timestamp', 'target_rad', 'target_deg', 'angle_rad', 'angle_deg',
+                          'iq_hold_A', 'peak_ramp_iq_A', 'present_id_A', 'input_voltage_V',
+                          'winding_temp_C', 'powerstage_temp_C', 'reached_target'])
 
         current_position = start_position
         for target_num, target in enumerate(targets, 1):
-            print(f"\n--- Target {target_num}/{len(targets)}: {target:.4f} rad ---")
+            print(f"\n--- Target {target_num}/{len(targets)}: {target:.4f} rad "
+                  f"({math.degrees(target):.1f} deg) ---")
 
             distance = target - current_position
             num_ramp_steps = max(1, int(abs(distance) / RAMP_STEP_SIZE))
             dwell_start = None
+            dwell_iq_samples = []
             last_logged_position = None
             reached_target = False
+            peak_ramp_iq = 0.0
             target_start_time = time.monotonic()
-            position = current_position
+            state = read_state()
 
-            # --- Phase 1: ramp goal_position incrementally toward target ---
             for i in range(1, num_ramp_steps + 1):
                 goal = current_position + distance * (i / num_ramp_steps)
                 iface.bear.set_goal_position((iface.id, goal))
                 time.sleep(RAMP_STEP_SLEEP)
 
-                position, velocity, iq_present, err = read_state()
-                temperature, scaled_limit = thermal_limit_scale()
-                print(f"  [ramp {i}/{num_ramp_steps}]  goal={goal:+.3f}  pos={position:+.3f}  "
-                      f"vel={velocity:+.3f}  iq={iq_present:+.3f}  temp={temperature}  "
-                      f"limit_i_max={scaled_limit:.2f}  err={err}")
+                state = read_state()
+                scaled_limit = thermal_limit_scale(state)
+                peak_ramp_iq = max(peak_ramp_iq, abs(state['iq']))
+                print(f"  [ramp {i}/{num_ramp_steps}]  goal={goal:+.3f}  pos={state['position']:+.3f}  "
+                      f"vel={state['velocity']:+.3f}  iq={state['iq']:+.3f}  "
+                      f"w_temp={state['winding_temp']}  p_temp={state['powerstage_temp']}  "
+                      f"limit_i_max={scaled_limit:.2f}  err={state['error']}")
 
-                if err != 128:
-                    raise RuntimeError(f"Non-normal error byte: {err}")
-                check_limits_and_abort(position)
+                if state['error'] != 128:
+                    raise RuntimeError(f"Non-normal error byte: {state['error']}")
+                check_limits_and_abort(state['position'])
 
-                position_error = abs(position - target)
-                if abs(velocity) < SETTLE_VELOCITY_THRESHOLD:
+                position_error = abs(state['position'] - target)
+                if abs(state['velocity']) < SETTLE_VELOCITY_THRESHOLD:
                     if dwell_start is None:
                         dwell_start = time.monotonic()
-                    elif time.monotonic() - dwell_start >= SETTLE_DWELL:
-                        if last_logged_position is None or abs(position - last_logged_position) > POSITION_SETTLE_TOLERANCE:
+                        dwell_iq_samples = []
+                    dwell_iq_samples.append(state['iq'])
+                    if time.monotonic() - dwell_start >= SETTLE_DWELL:
+                        if last_logged_position is None or abs(state['position'] - last_logged_position) > POSITION_SETTLE_TOLERANCE:
+                            avg_iq = sum(dwell_iq_samples) / len(dwell_iq_samples)
                             at_target = position_error <= POSITION_SETTLE_TOLERANCE
-                            writer.writerow([time.time(), f"{target:.4f}", f"{position:.4f}", f"{iq_present:.4f}",
-                                              f"{temperature:.1f}" if temperature is not None else "", at_target])
-                            f.flush()
-                            print(f"  LOGGED equilibrium: pos={position:.4f}  iq={iq_present:.4f}  at_target={at_target}")
-                            last_logged_position = position
+                            log_row(writer, f, target, state, avg_iq, peak_ramp_iq, at_target)
+                            print(f"  LOGGED equilibrium: pos={state['position']:.4f}  avg_iq={avg_iq:.4f}  at_target={at_target}")
+                            last_logged_position = state['position']
                             if at_target:
                                 reached_target = True
                 else:
                     dwell_start = None
+                    dwell_iq_samples = []
 
-            # --- Phase 2: goal is now fixed at target. Keep monitoring
-            # until it actually settles, or times out -- this is the
-            # phase that was missing before. Bounded by target_start_time,
-            # so total budget spans ramp + settle together. ---
             if not reached_target:
                 print("  Ramp done, goal now fixed at target. Waiting for settle...")
                 while time.monotonic() - target_start_time < PER_TARGET_TIMEOUT:
-                    position, velocity, iq_present, err = read_state()
-                    temperature, scaled_limit = thermal_limit_scale()
-                    position_error = abs(position - target)
-                    print(f"  [settle]  pos={position:+.3f}  vel={velocity:+.3f}  iq={iq_present:+.3f}  "
-                          f"pos_err={position_error:.3f}  temp={temperature}  "
-                          f"limit_i_max={scaled_limit:.2f}  err={err}")
+                    state = read_state()
+                    scaled_limit = thermal_limit_scale(state)
+                    position_error = abs(state['position'] - target)
+                    print(f"  [settle]  pos={state['position']:+.3f}  vel={state['velocity']:+.3f}  "
+                          f"iq={state['iq']:+.3f}  pos_err={position_error:.3f}  "
+                          f"w_temp={state['winding_temp']}  p_temp={state['powerstage_temp']}  "
+                          f"limit_i_max={scaled_limit:.2f}  err={state['error']}")
 
-                    if err != 128:
-                        raise RuntimeError(f"Non-normal error byte: {err}")
-                    check_limits_and_abort(position)
+                    if state['error'] != 128:
+                        raise RuntimeError(f"Non-normal error byte: {state['error']}")
+                    check_limits_and_abort(state['position'])
 
-                    if abs(velocity) < SETTLE_VELOCITY_THRESHOLD:
+                    if abs(state['velocity']) < SETTLE_VELOCITY_THRESHOLD:
                         if dwell_start is None:
                             dwell_start = time.monotonic()
-                        elif time.monotonic() - dwell_start >= SETTLE_DWELL:
-                            if last_logged_position is None or abs(position - last_logged_position) > POSITION_SETTLE_TOLERANCE:
+                            dwell_iq_samples = []
+                        dwell_iq_samples.append(state['iq'])
+                        if time.monotonic() - dwell_start >= SETTLE_DWELL:
+                            if last_logged_position is None or abs(state['position'] - last_logged_position) > POSITION_SETTLE_TOLERANCE:
+                                avg_iq = sum(dwell_iq_samples) / len(dwell_iq_samples)
                                 at_target = position_error <= POSITION_SETTLE_TOLERANCE
-                                writer.writerow([time.time(), f"{target:.4f}", f"{position:.4f}", f"{iq_present:.4f}",
-                                                  f"{temperature:.1f}" if temperature is not None else "", at_target])
-                                f.flush()
-                                print(f"  LOGGED equilibrium: pos={position:.4f}  iq={iq_present:.4f}  at_target={at_target}")
-                                last_logged_position = position
+                                log_row(writer, f, target, state, avg_iq, peak_ramp_iq, at_target)
+                                print(f"  LOGGED equilibrium: pos={state['position']:.4f}  avg_iq={avg_iq:.4f}  at_target={at_target}")
+                                last_logged_position = state['position']
                             reached_target = position_error <= POSITION_SETTLE_TOLERANCE
                             break
                     else:
                         dwell_start = None
+                        dwell_iq_samples = []
 
                     time.sleep(0.1)
 
-            current_position = position
+            current_position = state['position']
             if not reached_target:
                 print(f"  Did not confirm arrival at {target:.4f} rad.")
 
