@@ -1,0 +1,93 @@
+source file:      logs/human_live_csvs/human_live_20260818_224009.csv.gz
+source branch:    raw-data (git show raw-data:logs/human_live_csvs/human_live_20260818_224009.csv.gz | gunzip)
+date generated:   2026-09-17
+analyzers:
+  - useful_tools/analyze_human_run.py @ 59409e3
+  - useful_tools/analyze_assist_run.py @ 59409e3
+==============================================================================
+
+--- analyze_human_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260818_224009.csv
+943 samples over 2.8s at 333 Hz
+Angle range: act -0.2 to 24.9  (vest 71.8 to 96.9)
+
+========================================================================
+  1. ENGAGEMENT
+========================================================================
+  assist commanded on 11 samples (1.2%)
+  peak torque 2.010 Nm / 3.000 A
+  engaged over act 20.1 to 24.9 deg
+  commanded while moving DOWN: 0  (correct)
+  commanded while nearly still: 0
+  saturated at the clamp: 11 samples (1.2%)
+
+========================================================================
+  2. SELF-CONSISTENCY: TORQUE vs THE CONTROLLER'S OWN RESIDUAL
+========================================================================
+  settled samples (blend_w>=0.99, not saturated, |dtau/dt|<3.00 Nm/s): 0 of 11 engaged
+  Too few settled bins to judge shape.
+
+========================================================================
+  3. RATE LIMITER  (the fix for the flange failure)
+========================================================================
+  dtau/dt  p99 0.00   max 667.77 Nm/s (limit 4.0)
+  samples over 4.2 Nm/s: 1  <-- LIMITER LEAKING
+
+========================================================================
+  4. VELOCITY SIGNAL
+========================================================================
+  rejected samples: 0 (0.00%)
+  peak |velocity|: 5.55 rad/s
+
+========================================================================
+  5. LATCH  (the fix for stutter)
+========================================================================
+  latch transitions: 9 (3.18/s)
+  engaged segment length  p50 164 ms   min 150 ms
+  segments under 150 ms (min-on-time): 0  (correct)
+
+========================================================================
+  THERMAL
+========================================================================
+  winding 26 to 26 C     powerstage 28 to 29 C
+
+
+--- analyze_assist_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260818_224009.csv
+Rows 943   duration 2.8s   mean rate 333.2 Hz
+Commanded torque at any point: YES (live)
+
+==========================================================================
+  1. LOOP TIMING
+==========================================================================
+  dt ms   p50   3.00   p90   3.02   p99   3.14   max   5.00
+  iterations over 50 ms: 0 (0.00%)
+
+==========================================================================
+  2. VELOCITY SIGNAL QUALITY  (reported vs derivative of position)
+==========================================================================
+  |reported - derivative|   p50 0.0238   p90 0.0718   max 0.6701 rad/s
+  samples where position is clearly moving (>0.20 rad/s)
+    but reported velocity is near zero (<0.05): 0 of 282 moving samples  (0.0%)
+  -> No systematic dropout. Reported velocity tracks position.
+
+==========================================================================
+  3. BLEND CHATTER
+==========================================================================
+  assist engaged for 29.2% of samples
+  on/off transitions: 21  (7.42 per second)
+  ON  segment length  p50    10.6 ms   p90   180.5 ms
+  ON  segments under 100 ms: 6 of 10  -> felt as stutter
+  OFF segments under 100 ms: 9 of 11  -> dropouts mid-lift
+
+==========================================================================
+  4. COMMAND TRACKING  (live only)
+==========================================================================
+  commanded samples: 11
+  |iq_applied - iq_measured|  p50 0.4192  p90 0.6323  max 2.9935 A
+  -> Actuator is NOT following the command. Check it is in
+     torque mode, not left in position mode by a prior script.
+  near-constant-velocity samples (|acc| < 0.5): 0
+

@@ -1,0 +1,110 @@
+source file:      logs/human_live_csvs/human_live_20260821_002111.csv.gz
+source branch:    raw-data (git show raw-data:logs/human_live_csvs/human_live_20260821_002111.csv.gz | gunzip)
+date generated:   2026-09-17
+analyzers:
+  - useful_tools/analyze_human_run.py @ 59409e3
+  - useful_tools/analyze_assist_run.py @ 59409e3
+==============================================================================
+
+--- analyze_human_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260821_002111.csv
+19961 samples over 60.0s at 333 Hz
+Angle range: act -0.4 to 95.7  (vest 71.6 to 167.7)
+
+========================================================================
+  1. ENGAGEMENT
+========================================================================
+  assist commanded on 6988 samples (35.0%)
+  peak torque 1.691 Nm / 2.524 A
+  engaged over act 9.8 to 95.7 deg
+  commanded while moving DOWN: 1382  <-- SHOULD BE ZERO
+  commanded while nearly still: 1325
+  saturated at the clamp: 0 samples (0.0%)
+
+========================================================================
+  2. SELF-CONSISTENCY: TORQUE vs THE CONTROLLER'S OWN RESIDUAL
+========================================================================
+  settled samples (blend_w>=0.99, not saturated, |dtau/dt|<3.00 Nm/s): 2105 of 6988 engaged
+   act   vest      n   residual   tau_cmd   iq_meas
+    30    102     44     17.829     1.669     2.517
+    40    112    364     17.039     1.622     2.429
+    50    122    516     15.578     1.535     2.296
+    60    132    378     13.641     1.418     2.120
+    70    142    452     11.296     1.278     1.909
+    80    152    343      8.688     1.121     1.677
+    90    162      8      4.200     0.852     1.041
+
+  commanded torque range across bins: 0.817 Nm (0.852 to 1.669)
+
+  fit: tau_requested = 0.060 * tau_residual + 0.600   (n=2105, R^2=1.000)
+  slope is the effective alpha actually used this run; intercept is roughly k_f * TAU_FRICTION * blend_w.
+  This confirms the control law's own arithmetic is behaving
+  as coded -- it is not evidence the spring/gravity model
+  matches reality. See model_validation logs + extract_spring.py
+  for that comparison.
+
+========================================================================
+  3. RATE LIMITER  (the fix for the flange failure)
+========================================================================
+  dtau/dt  p99 4.02   max 4.03 Nm/s (limit 4.0)
+  samples over 4.2 Nm/s: 0  (holding)
+
+========================================================================
+  4. VELOCITY SIGNAL
+========================================================================
+  rejected samples: 0 (0.00%)
+  peak |velocity|: 3.81 rad/s
+
+========================================================================
+  5. LATCH  (the fix for stutter)
+========================================================================
+  latch transitions: 66 (1.10/s)
+  engaged segment length  p50 492 ms   min 150 ms
+  segments under 150 ms (min-on-time): 1  (correct)
+
+========================================================================
+  THERMAL
+========================================================================
+  winding 26 to 27 C     powerstage 29 to 31 C
+
+
+--- analyze_assist_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260821_002111.csv
+Rows 19961   duration 60.0s   mean rate 332.7 Hz
+Commanded torque at any point: YES (live)
+
+==========================================================================
+  1. LOOP TIMING
+==========================================================================
+  dt ms   p50   3.00   p90   3.03   p99   3.15   max   5.23
+  iterations over 50 ms: 0 (0.00%)
+
+==========================================================================
+  2. VELOCITY SIGNAL QUALITY  (reported vs derivative of position)
+==========================================================================
+  |reported - derivative|   p50 0.0273   p90 0.0920   max 0.5876 rad/s
+  samples where position is clearly moving (>0.20 rad/s)
+    but reported velocity is near zero (<0.05): 9 of 10929 moving samples  (0.1%)
+  -> No systematic dropout. Reported velocity tracks position.
+
+==========================================================================
+  3. BLEND CHATTER
+==========================================================================
+  assist engaged for 28.4% of samples
+  on/off transitions: 90  (1.50 per second)
+  ON  segment length  p50   132.0 ms   p90   942.8 ms
+  ON  segments under 100 ms: 18 of 45  -> felt as stutter
+  OFF segments under 100 ms: 13 of 45  -> dropouts mid-lift
+
+==========================================================================
+  4. COMMAND TRACKING  (live only)
+==========================================================================
+  commanded samples: 6883
+  |iq_applied - iq_measured|  p50 0.0444  p90 0.1216  max 0.2995 A
+  near-constant-velocity samples (|acc| < 0.5): 221
+    |applied - measured| here  p50 0.0337  p90 0.1001 A
+    (only these windows are valid for model validation --
+     the model is quasi-static and ignores inertia)
+

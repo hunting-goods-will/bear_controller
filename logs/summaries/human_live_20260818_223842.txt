@@ -1,0 +1,89 @@
+source file:      logs/human_live_csvs/human_live_20260818_223842.csv.gz
+source branch:    raw-data (git show raw-data:logs/human_live_csvs/human_live_20260818_223842.csv.gz | gunzip)
+date generated:   2026-09-17
+analyzers:
+  - useful_tools/analyze_human_run.py @ 59409e3
+  - useful_tools/analyze_assist_run.py @ 59409e3
+==============================================================================
+
+--- analyze_human_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260818_223842.csv
+864 samples over 2.6s at 333 Hz
+Angle range: act -0.2 to 24.5  (vest 71.8 to 96.5)
+
+========================================================================
+  1. ENGAGEMENT
+========================================================================
+  assist commanded on 9 samples (1.0%)
+  peak torque 2.010 Nm / 3.000 A
+  engaged over act 20.1 to 24.5 deg
+  commanded while moving DOWN: 0  (correct)
+  commanded while nearly still: 0
+  saturated at the clamp: 9 samples (1.0%)
+
+========================================================================
+  2. SELF-CONSISTENCY: TORQUE vs THE CONTROLLER'S OWN RESIDUAL
+========================================================================
+  settled samples (blend_w>=0.99, not saturated, |dtau/dt|<3.00 Nm/s): 0 of 9 engaged
+  Too few settled bins to judge shape.
+
+========================================================================
+  3. RATE LIMITER  (the fix for the flange failure)
+========================================================================
+  dtau/dt  p99 0.00   max 667.77 Nm/s (limit 4.0)
+  samples over 4.2 Nm/s: 1  <-- LIMITER LEAKING
+
+========================================================================
+  4. VELOCITY SIGNAL
+========================================================================
+  rejected samples: 0 (0.00%)
+  peak |velocity|: 5.53 rad/s
+
+========================================================================
+  5. LATCH  (the fix for stutter)
+========================================================================
+  latch transitions: 1 (0.39/s)
+
+========================================================================
+  THERMAL
+========================================================================
+  winding 26 to 26 C     powerstage 28 to 29 C
+
+
+--- analyze_assist_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260818_223842.csv
+Rows 864   duration 2.6s   mean rate 333.2 Hz
+Commanded torque at any point: YES (live)
+
+==========================================================================
+  1. LOOP TIMING
+==========================================================================
+  dt ms   p50   3.00   p90   3.03   p99   3.13   max   5.06
+  iterations over 50 ms: 0 (0.00%)
+
+==========================================================================
+  2. VELOCITY SIGNAL QUALITY  (reported vs derivative of position)
+==========================================================================
+  |reported - derivative|   p50 0.0206   p90 0.0532   max 0.6353 rad/s
+  samples where position is clearly moving (>0.20 rad/s)
+    but reported velocity is near zero (<0.05): 0 of 125 moving samples  (0.0%)
+  -> No systematic dropout. Reported velocity tracks position.
+
+==========================================================================
+  3. BLEND CHATTER
+==========================================================================
+  assist engaged for 14.7% of samples
+  on/off transitions: 1  (0.39 per second)
+  OFF segments under 100 ms: 0 of 1  -> dropouts mid-lift
+
+==========================================================================
+  4. COMMAND TRACKING  (live only)
+==========================================================================
+  commanded samples: 9
+  |iq_applied - iq_measured|  p50 0.5908  p90 1.1328  max 3.0298 A
+  -> Actuator is NOT following the command. Check it is in
+     torque mode, not left in position mode by a prior script.
+  near-constant-velocity samples (|acc| < 0.5): 0
+

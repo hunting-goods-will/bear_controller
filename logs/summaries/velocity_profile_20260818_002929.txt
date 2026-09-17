@@ -1,0 +1,37 @@
+source file:      logs/velocity_profile_csvs/velocity_profile_20260818_002929.csv.gz
+source branch:    raw-data (git show raw-data:logs/velocity_profile_csvs/velocity_profile_20260818_002929.csv.gz | gunzip)
+date generated:   2026-09-17
+analyzer:         useful_tools/Analyse_velocity_profile.py @ 2b2753e
+==============================================================================
+
+--- Analyse_velocity_profile.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/velocity_profile_20260818_002929.csv
+Blocks: 19   Samples: 70596
+Worst non-intentional velocity observed: 0.6528 rad/s
+
+==============================================================================
+  TRIGGER THRESHOLD TRADEOFF
+==============================================================================
+  thresh  lifts   lat_p50   lat_p90   deg_p50   deg_p90   false
+   rad/s               ms        ms       deg       deg   fires
+------------------------------------------------------------------------------
+    0.08     29       6.0      11.9      0.02      0.06       0
+    0.10     29       9.0      18.0      0.03      0.09       0
+    0.15     28      12.0      25.0      0.06      0.15       0
+    0.20     27      15.0      39.6      0.10      0.37       0
+    0.30     24      21.0      39.0      0.16      0.50       0
+    0.45     24      29.9     207.3      0.37      8.44       0
+    0.60     20      45.0     543.2      0.76     34.90       0
+
+==============================================================================
+  DESCENDING MOTION (negative velocity)
+==============================================================================
+lower_controlled     n=  5380  p50= -0.0516  p10= -0.9120  min= -1.3793
+overhead_task        n=  6374  p50= -0.0196  p10= -0.8035  min= -2.2577
+
+How to read this: pick the lowest threshold with zero false fires,
+then check whether its deg_p90 is an acceptable amount of unassisted
+travel. If it isn't, velocity triggering is the wrong architecture
+and the trigger needs the current signal.
+

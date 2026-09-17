@@ -1,0 +1,40 @@
+source file:      logs/human_monitor_csvs/human_monitor_20260818_223506.csv.gz
+source branch:    raw-data (git show raw-data:logs/human_monitor_csvs/human_monitor_20260818_223506.csv.gz | gunzip)
+date generated:   2026-09-17
+analyzer:         useful_tools/analyze_assist_run.py @ 59409e3
+==============================================================================
+
+--- analyze_assist_run.py ---
+
+File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_monitor_20260818_223506.csv
+Rows 11396   duration 34.3s   mean rate 332.7 Hz
+Commanded torque at any point: no (monitor)
+
+==========================================================================
+  1. LOOP TIMING
+==========================================================================
+  dt ms   p50   3.00   p90   3.01   p99   3.12   max   5.11
+  iterations over 50 ms: 0 (0.00%)
+
+==========================================================================
+  2. VELOCITY SIGNAL QUALITY  (reported vs derivative of position)
+==========================================================================
+  |reported - derivative|   p50 0.0227   p90 0.0724   max 0.9850 rad/s
+  samples where position is clearly moving (>0.20 rad/s)
+    but reported velocity is near zero (<0.05): 6 of 3526 moving samples  (0.2%)
+  -> No systematic dropout. Reported velocity tracks position.
+
+==========================================================================
+  3. BLEND CHATTER
+==========================================================================
+  assist engaged for 17.7% of samples
+  on/off transitions: 64  (1.87 per second)
+  ON  segment length  p50    15.0 ms   p90   371.1 ms
+  ON  segments under 100 ms: 24 of 32  -> felt as stutter
+  OFF segments under 100 ms: 12 of 32  -> dropouts mid-lift
+
+==========================================================================
+  4. COMMAND TRACKING  (live only)
+==========================================================================
+  No commanded samples. Monitor run.
+

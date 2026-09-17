@@ -1,0 +1,19 @@
+source file:      logs/spring_characterization/position_sweep_FINAL_20260804_203506.csv.gz
+source branch:    raw-data (git show raw-data:logs/spring_characterization/position_sweep_FINAL_20260804_203506.csv.gz | gunzip)
+date generated:   2026-09-17
+analyzer:         none -- no compatible analyzer exists for this schema
+==============================================================================
+
+This file is a single-direction position-mode holding-current sweep
+(columns: timestamp, target_rad, target_deg, angle_rad, angle_deg,
+iq_hold_A, peak_ramp_iq_A, present_id_A, input_voltage_V, winding_temp_C,
+powerstage_temp_C, reached_target). It has no sweep_direction column, so
+friction and spring torque cannot be separated the way
+analyze_bidirectional_sweep.py does for the two-direction sweeps in this
+same folder (see Bidirectional_sweep.py's own docstring: a single-direction
+sweep fuses spring torque and friction inseparably -- every point settles
+on the spring value plus roughly the friction torque in that direction).
+
+No script in useful_tools/ reads this schema. Raw data is preserved on the
+raw-data branch; retrieve with the command above if this needs manual
+analysis in the future.
