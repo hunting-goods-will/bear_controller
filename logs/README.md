@@ -45,8 +45,8 @@ Dated 2026-08-20.
 
 | File | Notes |
 |---|---|
-| `model_validation_20260820_234335.csv.gz` | 2026-08-20 session |
-| `model_validation_20260820_235718.csv.gz` | 2026-08-20 session |
+| `model_validation_20260820_234335.csv.gz` | 2026-08-20 session. **Anomalous, see below** — kept here for reference but removed from `main` and excluded from generated summaries. |
+| `model_validation_20260820_235718.csv.gz` | 2026-08-20 session. Clean bare-rig validation run. |
 
 **Missing data**: Five validation runs were made on 2026-08-20/21 at 0.05,
 0.10, 0.20, 0.35, and 0.50 rad/s. Only two CSVs were retained, both at
@@ -56,6 +56,29 @@ they are two of the five runs or later re-runs. No retained data exists at
 0.05, 0.20, 0.35, or 0.50 rad/s. The friction-vs-velocity fit and the
 ±0.006 Nm reproducibility claim in CONTROL_DESIGN_STATE_v4.md are not
 reproducible from retained raw data; re-collection is planned.
+
+**Update (repo cleanup, 2026-09-17)**: of the two retained CSVs, only
+`model_validation_20260820_235718.csv.gz` is actually consistent with a
+bare-rig run described above — its logged `tau_gravity` matches
+`RIG_MGL` alone, and comparing its logged `residual_measured` against
+`tau_gravity − tau_spring` (both legs averaged to cancel friction) gives a
+clean mean error of +0.009 Nm, max 0.142 Nm, in line with
+CONTROL_DESIGN_STATE_v4.md's aggregate "+0.126 Nm mean, 0.211 Nm max"
+claim.
+
+`model_validation_20260820_234335.csv.gz` is a **different, unresolved
+experiment**: its logged `tau_gravity` (~5.1 Nm at vest 90°) implies a
+~1.5 kg loaded arm, matching `validate_model.py`'s wrench-load
+"falsifiable prediction" test, not the bare-rig sweep. That test's own
+docstring states the prediction fails if `iq_measured` comes back negative
+("either the load is not what we think or the sign convention is
+inverted") — and in this file `iq_measured` is negative throughout,
+opposite in sign from what `tau_gravity − tau_spring` predicts in 15 of 17
+angle bins. This was apparently never diagnosed or resolved. The file is
+kept on this branch for that future diagnosis, but was removed from `main`
+(git rm, not `git filter` — still in this branch's history) and is
+excluded from `logs/summaries/` since its numbers aren't physically
+meaningful as-is.
 
 ### `velocity_profile_csvs/` — velocity-threshold characterization sweep
 Producer: `useful_tools/Velocity_profile.py`. Actuator disabled throughout;
