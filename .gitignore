@@ -1,6 +1,7 @@
 venv/
 __pycache__/
 *.pyc
-logs/*.csv
+logs/**/*.csv
+logs/**/*.csv.gz
 *.egg-info/
 tmux-*.log
