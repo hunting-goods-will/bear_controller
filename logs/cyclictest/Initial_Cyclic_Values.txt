@@ -1,0 +1,12 @@
+=== 500Hz idle ===
+# /dev/cpu_dma_latency set to 0us
+T: 0 ( 3308) P: 0 I:2000 C: 100000 Min:     30 Act:   65 Avg:   68 Max:     161
+=== 800Hz idle ===
+# /dev/cpu_dma_latency set to 0us
+T: 0 ( 3318) P: 0 I:1250 C: 100000 Min:     32 Act:   65 Avg:   67 Max:     197
+=== 500Hz loaded ===
+# /dev/cpu_dma_latency set to 0us
+T: 0 ( 1393) P: 0 I:2000 C: 100000 Min:     24 Act:   63 Avg:   93 Max:    5732 
+=== 800Hz loaded ===
+# /dev/cpu_dma_latency set to 0us
+T: 0 ( 1401) P: 0 I:1250 C: 100000 Min:     33 Act:   60 Avg:  100 Max:    8183
