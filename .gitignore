@@ -5,3 +5,5 @@ logs/**/*.csv
 logs/**/*.csv.gz
 *.egg-info/
 tmux-*.log
+CLAUDE.md
+docs/
