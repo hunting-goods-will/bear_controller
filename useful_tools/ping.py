@@ -6,13 +6,12 @@ Search for available BEARs
 
 from pybear import Manager
 
-# Define port and baud rate
-bear_port = "/dev/ttyUSB0"
-bear_baudrate = 8000000
+from main_controller.config import PORT, BAUDRATE
+
 # Define ID search range
 id_range = range(0, 9)
 
-bear = Manager.BEAR(port=bear_port, baudrate=bear_baudrate)
+bear = Manager.BEAR(port=PORT, baudrate=BAUDRATE)
 bear_list = []
 found = False
 for i in id_range:
