@@ -1,9 +1,10 @@
 """
 Diagnose an assist run CSV. Paste the OUTPUT, not the data.
 
-    python3 useful_tools/analyze_assist_run.py logs/assist_live_YYYYMMDD_HHMMSS.csv
+    python3 useful_tools/analyze_assist_run.py logs/human_live_YYYYMMDD_HHMMSS.csv
+    python3 useful_tools/analyze_assist_run.py logs/human_monitor_YYYYMMDD_HHMMSS.csv
 
-FIVE QUESTIONS
+FOUR QUESTIONS
 --------------
 1. LOOP TIMING. Is the loop keeping up, and did reads stall? A comm stall in
    live mode leaves the last commanded torque applied for the duration.
@@ -17,18 +18,24 @@ FIVE QUESTIONS
 3. BLEND CHATTER. How often does the command switch on and off, and how long
    are the segments? Rapid toggling is felt as stutter.
 
-4. POSITIVE FEEDBACK. tau_cmd is proportional to w(theta_dot), so applying
-   torque raises velocity, which raises w, which raises torque. That loop has
-   the sign of NEGATIVE DAMPING. Its signature is acceleration INCREASING in
-   the moments right after assist engages. This is the suspected cause of the
-   jerk on upward motion, and this section is the test for it.
-
-5. COMMAND TRACKING (live only). Does iq_measured follow iq_applied? If not,
+4. COMMAND TRACKING (live only). Does iq_measured follow iq_applied? If not,
    either the actuator is not in torque mode, or it is saturating.
 
 Model validation is deliberately restricted to near-constant-velocity windows:
 controller.py is quasi-static and has no J*alpha term, so during acceleration
 the prediction is expected to be wrong and comparing there proves nothing.
+
+A fifth question used to live here: whether commanded torque shows a
+positive-feedback (negative-damping) signature right after assist onset.
+It's removed. Onset was detected purely from blend_w crossing zero, which is
+a function of velocity alone and fires identically whether or not any torque
+is applied -- so the "assist onsets analysed" / before-after acceleration
+numbers were computed and printed on zero-torque MONITOR runs too, where
+they cannot mean anything. The script only gated the final verdict string on
+max(iq_applied), not the onset detection itself, which is the artifact. A
+valid version of this test needs a live run and a monitor run at matched
+conditions (same movement, same timing) compared against each other -- not
+derivable from a single log, so it isn't attempted here.
 """
 import csv
 import math
@@ -147,46 +154,16 @@ def main(path):
         print(f"  OFF segments under 100 ms: {len(gaps)} of {len(seg_off)}"
               f"  -> dropouts mid-lift")
 
-    # -- 4. POSITIVE FEEDBACK ------------------------------------------------
-    # Acceleration in the window before vs after each assist onset.
+    # Acceleration series, used below to restrict command-tracking validation
+    # to near-constant-velocity windows (the model is quasi-static).
     acc = [None] * n
     for i in range(1, n - 1):
         if dt[i] and dt[i] > 0 and vel[i + 1] is not None and vel[i - 1] is not None:
             acc[i] = (vel[i + 1] - vel[i - 1]) / (t[i + 1] - t[i - 1] or 1e-6)
-    onsets = [i for i in trans if on[i]]
-    before, after = [], []
-    WIN = 8
-    for i in onsets:
-        b = [acc[j] for j in range(max(1, i - WIN), i) if acc[j] is not None]
-        a = [acc[j] for j in range(i, min(n - 1, i + WIN)) if acc[j] is not None]
-        if b and a:
-            before.append(sum(b) / len(b))
-            after.append(sum(a) / len(a))
-    print("\n" + "=" * 74)
-    print("  4. POSITIVE FEEDBACK  (negative-damping signature)")
-    print("=" * 74)
-    if not before:
-        print("  No assist onsets with usable windows.")
-    else:
-        mb, ma = sum(before) / len(before), sum(after) / len(after)
-        print(f"  assist onsets analysed: {len(before)}")
-        print(f"  mean acceleration BEFORE onset: {mb:+.3f} rad/s^2")
-        print(f"  mean acceleration AFTER  onset: {ma:+.3f} rad/s^2")
-        worse = sum(1 for b, a in zip(before, after) if a > b + 0.2)
-        print(f"  onsets where acceleration INCREASED: {worse} of {len(before)}")
-        if max(iq_app) > 0.001 and ma > mb + 0.2:
-            print("  -> POSITIVE FEEDBACK CONFIRMED. Commanded torque is raising")
-            print("     velocity, which raises the blend, which raises torque.")
-            print("     This is the jerk. It is structural, not a tuning error.")
-        elif max(iq_app) <= 0.001:
-            print("  -> monitor run: no torque was applied, so this cannot show")
-            print("     feedback. Re-run on a LIVE log to test it.")
-        else:
-            print("  -> No clear feedback signature in this run.")
 
-    # -- 5. COMMAND TRACKING -------------------------------------------------
+    # -- 4. COMMAND TRACKING -------------------------------------------------
     print("\n" + "=" * 74)
-    print("  5. COMMAND TRACKING  (live only)")
+    print("  4. COMMAND TRACKING  (live only)")
     print("=" * 74)
     live = [(iq_app[i], iq_meas[i], acc[i], act[i]) for i in range(n)
             if iq_app[i] is not None and iq_app[i] > 0.05 and iq_meas[i] is not None]

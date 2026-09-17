@@ -3,17 +3,20 @@ Analyse a live human assist run.
 
     python3 useful_tools/analyze_human_run.py logs/human_live_YYYYMMDD_HHMMSS.csv
 
-THE CLAIM THIS HAS TO SUPPORT
------------------------------
-"Noticeable assistance" is satisfied by commanding constant torque, which would
-have needed none of the characterization work. So the question this answers is
-narrower and harder:
+SECTION 2, IN CONTEXT
+----------------------
+Section 2 checks whether commanded torque tracks tau_residual -- the value
+controller.py itself computed for this same run -- restricted to samples
+where the blend is fully engaged (blend_w >= 0.99), not saturated at the
+torque ceiling, and not mid-ramp on the rate limiter ("settled" samples).
 
-    Did the assist VARY WITH ANGLE in the way the spring model predicts?
-
-Section 2 is that test. If commanded torque tracks the predicted residual curve
-across the stroke, the characterization did real work. If it is flat, the result
-is real but the model contributed nothing to it.
+Because tau_requested is a deterministic, near-linear function of that same
+row's tau_residual (see main_controller/controller.py), a clean fit here
+confirms the control law's own arithmetic is behaving as coded -- it is a
+self-consistency check, not a test of whether the spring/gravity MODEL
+matches physical reality. For that, see logs/model_validation_csvs/ and
+extract_spring.py, which compare the model's prediction against
+independently measured actuator current from a scripted, non-human run.
 
 The other sections check the safety mechanisms actually engaged rather than
 being present but never exercised.
@@ -21,6 +24,8 @@ being present but never exercised.
 import csv
 import math
 import sys
+
+from main_controller.controller import MAX_TAU_RATE
 
 
 def pct(v, p):
@@ -86,48 +91,78 @@ def main(path):
               f"({100*sum(sat)/n:.1f}%)"
               f"{'  <-- curve is being flattened' if sum(sat) > 0.02*n else ''}")
 
-    # --- 2. WAS THE ASSIST MODEL-SHAPED? ------------------------------------
+    # --- 2. SELF-CONSISTENCY: TORQUE vs THE CONTROLLER'S OWN RESIDUAL -------
     print("\n" + "=" * 72)
-    print("  2. DID ASSIST VARY WITH ANGLE AS THE MODEL PREDICTS?")
+    print("  2. SELF-CONSISTENCY: TORQUE vs THE CONTROLLER'S OWN RESIDUAL")
     print("=" * 72)
-    bins = {}
+
+    rate_limit = 0.75 * MAX_TAU_RATE
+    settled = []
+    blank_tau = 0
     for i in on:
+        if w[i] is None or w[i] < 0.99:
+            continue
+        if sat[i]:
+            continue
+        if tau[i] is None:
+            blank_tau += 1
+            continue
+        if i == 0 or tau[i - 1] is None or dt[i] is None or dt[i] <= 0:
+            blank_tau += 1
+            continue
+        if abs(tau[i] - tau[i - 1]) / dt[i] > rate_limit:
+            continue
+        settled.append(i)
+    if blank_tau:
+        print(f"  skipped (blank tau_requested, or no dt to check rate): {blank_tau}")
+    print(f"  settled samples (blend_w>=0.99, not saturated, |dtau/dt|<"
+          f"{rate_limit:.2f} Nm/s): {len(settled)} of {len(on)} engaged")
+
+    bins = {}
+    for i in settled:
         if res[i] is None:
             continue
         b = round(act[i] / 10.0) * 10.0
         bins.setdefault(b, []).append((tau[i], res[i], iq_meas[i]))
     if len(bins) < 2:
-        print("  Too few engaged bins to judge shape.")
+        print("  Too few settled bins to judge shape.")
     else:
         print(f"{'act':>6}{'vest':>7}{'n':>7}{'residual':>11}{'tau_cmd':>10}"
               f"{'iq_meas':>10}")
-        xs, ys = [], []
+        bin_tc = []
         for b in sorted(bins):
             v = bins[b]
             r = sum(x[1] for x in v)/len(v)
             tc = sum(x[0] for x in v)/len(v)
             im = sum(x[2] for x in v if x[2] is not None)/max(1, len(v))
-            xs.append(r); ys.append(tc)
+            bin_tc.append(tc)
             print(f"{b:6.0f}{b+72:7.0f}{len(v):7}{r:11.3f}{tc:10.3f}{im:10.3f}")
-        spread = max(ys) - min(ys)
+        spread = max(bin_tc) - min(bin_tc)
         print(f"\n  commanded torque range across bins: {spread:.3f} Nm "
-              f"({min(ys):.3f} to {max(ys):.3f})")
-        if spread < 0.15:
-            print("  -> ESSENTIALLY FLAT. Indistinguishable from constant torque;")
-            print("     the characterization did not shape this run.")
+              f"({min(bin_tc):.3f} to {max(bin_tc):.3f})")
+
+        fit = [(res[i], tau[i]) for i in settled
+               if res[i] is not None and res[i] > 0]
+        if len(fit) < 2:
+            print("  Too few settled samples with tau_residual > 0 to fit.")
         else:
-            # correlation between predicted residual and commanded torque
+            xs = [p[0] for p in fit]
+            ys = [p[1] for p in fit]
             k = len(xs); mx = sum(xs)/k; my = sum(ys)/k
-            num = sum((a-mx)*(b-my) for a, b in zip(xs, ys))
-            den = (sum((a-mx)**2 for a in xs) * sum((b-my)**2 for b in ys)) ** 0.5
-            rr = num/den if den else 0.0
-            print(f"  correlation with predicted residual: r = {rr:+.3f}")
-            if rr > 0.8:
-                print("  -> MODEL-SHAPED. Commanded torque tracks the predicted")
-                print("     residual across the stroke. The spring characterization")
-                print("     is doing real work, not just setting a constant.")
-            else:
-                print("  -> Varies, but not clearly along the predicted curve.")
+            sxx = sum((a-mx)**2 for a in xs)
+            sxy = sum((a-mx)*(b-my) for a, b in zip(xs, ys))
+            syy = sum((b-my)**2 for b in ys)
+            slope = sxy / sxx if sxx else 0.0
+            intercept = my - slope * mx
+            r2 = (sxy * sxy) / (sxx * syy) if sxx and syy else 0.0
+            print(f"\n  fit: tau_requested = {slope:.3f} * tau_residual + "
+                  f"{intercept:.3f}   (n={k}, R^2={r2:.3f})")
+            print("  slope is the effective alpha actually used this run; "
+                  "intercept is roughly k_f * TAU_FRICTION * blend_w.")
+            print("  This confirms the control law's own arithmetic is behaving")
+            print("  as coded -- it is not evidence the spring/gravity model")
+            print("  matches reality. See model_validation logs + extract_spring.py")
+            print("  for that comparison.")
 
     # --- 3. RATE LIMITER ----------------------------------------------------
     rates = [abs(tau[i]-tau[i-1])/dt[i] for i in range(1, n)
