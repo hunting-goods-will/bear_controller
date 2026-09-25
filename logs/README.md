@@ -64,4 +64,4 @@ grouped by campaign:
 | Folder | Contents |
 |---|---|
 | `cyclictest/2026-07_stock_initial/` | July 2026 stock-kernel runs and their note: three 4-thread histogram runs and a single-thread 500/800 Hz summary, all 100k cycles per thread. Different protocol and duration -- not directly comparable with 2026-09. |
-| `cyclictest/2026-09_stock_vs_rt/` | `README.md` with the stock 6.18.50 results and percentile table; PREEMPT_RT results to follow. Raw histograms are on `raw-data` only, under the same path. |
+| `cyclictest/2026-09_stock_vs_rt/` | `README.md` with the stock 6.18.50 and PREEMPT_RT 6.18.50-v8-rt1 results, percentile tables and comparison. Raw histograms are on `raw-data` only, under the same path. |
