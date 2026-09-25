@@ -79,6 +79,12 @@ roughly six-fold drop in the overall worst case (1,430 → 240 µs). But the RT 
 slightly lighter, and a strict comparison would rerun one kernel with the
 other's background.
 
+**Planned:** rerun stock 6.18.50 with no VS Code server or Copilot running
+(plain SSH + tmux only), with an identical protocol, saved as
+`../stock_6.18.50_no_vscode/`, before these numbers are used in a paper.
+Reason: this RT run had no VS Code while stock had two VS Code servers plus
+Copilot, a confound that favors RT.
+
 ## System
 
 - **Hardware:** Raspberry Pi 4 Model B Rev 1.5, 8 GB — same board as stock.
@@ -88,9 +94,13 @@ other's background.
   the stock config plus `PREEMPT_RT=y`, the options Kconfig adjusts because of
   it, and `LOCALVERSION="-v8-rt1"`; `CONFIG_HZ=250` as stock.
 - **Boot:** booted once via **tryboot** at 11:47:52. `/boot/firmware/tryboot.txt`
-  is `config.txt` plus `[all]` / `kernel=kernel8-rt.img`; `config.txt` itself
-  was not changed, so a normal reboot returns to stock. `auto_initramfs=1`
-  loaded `initramfs8-rt` ("Freeing initrd memory: 11580K" in the boot log).
+  was `config.txt` plus `[all]` / `kernel=kernel8-rt.img`; at test time
+  `config.txt` itself was unchanged, so a normal reboot returned to stock.
+  `auto_initramfs=1` loaded `initramfs8-rt` ("Freeing initrd memory: 11580K"
+  in the boot log). **Since 2026-09-25 16:29, RT is the permanent boot
+  kernel:** `config.txt` has `kernel=kernel8-rt.img`, `tryboot.txt` is now the
+  stock config (one-shot fallback via `sudo reboot '0 tryboot'`), and the
+  original is kept as `config.txt.stock-backup`.
 - **Tools:** cyclictest V 2.60, stress-ng 0.19.02 — same versions as stock.
 - **CPU clock:** locked at 1.2 GHz, governor `performance`. The journal shows
   the same sequence as stock at 11:57:31: `sudo tee` to `cpu0`'s
@@ -98,7 +108,8 @@ other's background.
   cores read 1200000 in every conditions snapshot.
 - **Power:** UPS HAT (E) on external power for both runs: `ups-monitor.service`
   logged "Fast Charging state", battery 100 %, VBUS ≈ 12.07 V, pack ≈ 16.81 V.
-- **Physical setup:** not re-recorded for this run.
+- **Physical setup:** Pi out of its case, no heatsink, no fan, USB-C into the
+  UPS HAT (E) — same as stock.
 - **Background processes:** `ups-monitor.service`
   (`/home/samuel/projects/ups_hat/UPS_HAT_E/ups.py`), two plain SSH sessions
   (logged in 11:49:57 and 11:58:13), and system daemons. **No VS Code server
