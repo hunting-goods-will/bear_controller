@@ -45,8 +45,8 @@ Dated 2026-08-20.
 
 | File | Notes |
 |---|---|
-| `model_validation_20260820_234335.csv.gz` | 2026-08-20 session. **Anomalous, see below** — kept here for reference but removed from `main` and excluded from generated summaries. |
-| `model_validation_20260820_235718.csv.gz` | 2026-08-20 session. Clean bare-rig validation run. |
+| `model_validation_20260820_234335.csv.gz` | 2026-08-20 session. Bare-rig run, **held-out** check of the current spring table. Its logged prediction used the wrong load constant (1.5025 kg); see the correction below. Summarized on `main` with gravity recomputed as bare rig. |
+| `model_validation_20260820_235718.csv.gz` | 2026-08-20 session. Bare-rig run, **in-sample**: the current `TAU_SPRING_TABLE` was extracted from this run. |
 
 **Missing data**: Five validation runs were made on 2026-08-20/21 at 0.05,
 0.10, 0.20, 0.35, and 0.50 rad/s. Only two CSVs were retained, both at
@@ -57,28 +57,34 @@ they are two of the five runs or later re-runs. No retained data exists at
 ±0.006 Nm reproducibility claim in CONTROL_DESIGN_STATE_v4.md are not
 reproducible from retained raw data; re-collection is planned.
 
-**Update (repo cleanup, 2026-09-17)**: of the two retained CSVs, only
-`model_validation_20260820_235718.csv.gz` is actually consistent with a
-bare-rig run described above — its logged `tau_gravity` matches
-`RIG_MGL` alone, and comparing its logged `residual_measured` against
-`tau_gravity − tau_spring` (both legs averaged to cancel friction) gives a
-clean mean error of +0.009 Nm, max 0.142 Nm, in line with
-CONTROL_DESIGN_STATE_v4.md's aggregate "+0.126 Nm mean, 0.211 Nm max"
-claim.
+**Update (corrected 2026-09-25)**: both retained CSVs are bare-rig runs from
+the same session at the same speed.
 
-`model_validation_20260820_234335.csv.gz` is a **different, unresolved
-experiment**: its logged `tau_gravity` (~5.1 Nm at vest 90°) implies a
-~1.5 kg loaded arm, matching `validate_model.py`'s wrench-load
-"falsifiable prediction" test, not the bare-rig sweep. That test's own
-docstring states the prediction fails if `iq_measured` comes back negative
-("either the load is not what we think or the sign convention is
-inverted") — and in this file `iq_measured` is negative throughout,
-opposite in sign from what `tau_gravity − tau_spring` predicts in 15 of 17
-angle bins. This was apparently never diagnosed or resolved. The file is
-kept on this branch for that future diagnosis, but was removed from `main`
-(git rm, not `git filter` — still in this branch's history) and is
-excluded from `logs/summaries/` since its numbers aren't physically
-meaningful as-is.
+- `model_validation_20260820_235718.csv.gz`: logged `tau_gravity` matches
+  `RIG_MGL` alone. Its error against its own logged spring values is
+  +0.009 Nm mean, 0.142 Nm max. The current `TAU_SPRING_TABLE` was
+  extracted from this run (all 20 entries identical), so it is **in-sample**:
+  its near-zero error against the current table is fit residual, not
+  predictive accuracy.
+- `model_validation_20260820_234335.csv.gz`: the **held-out** check. It is
+  **not anomalous**. It was logged while `validate_model.py` hardcoded
+  `ARM_MASS_KG = 1.5025` at 0.2739 m, so its logged `tau_gravity` (~5.1 Nm
+  at vest 90°, implied mgL 5.1384 Nm) and `residual_predicted` assume a
+  wrench that was not fitted. Evidence that the rig was bare: its
+  leg-averaged `KT*iq_measured` matches `RIG_MGL`-only gravity minus spring,
+  and matches `235718` within 0.044 Nm at every 5° bin; a 1.5 kg load at
+  274 mm would have shifted iq by about +6 A. With gravity recomputed from
+  `RIG_MGL` alone, its error against the current table is **+0.021 Nm mean,
+  0.054 Nm max, 17 bins**.
+
+The 2026-09-17 version of this note called `234335` a "sign-mismatch
+anomaly" (negative `iq_measured` against a positive loaded prediction).
+That was a misdiagnosis: the sign mismatch came from the wrong load
+constant in the logged prediction, not from the measurement. `234335` was
+removed from `main` at that time; `main` now carries its summary
+(`logs/summaries/model_validation_20260820_234335.txt`). To stop this
+recurring, `validate_model.py` now requires `--arm-mass-kg` and
+`--arm-com-m` and writes both into every CSV row.
 
 ### `velocity_profile_csvs/` — velocity-threshold characterization sweep
 Producer: `useful_tools/Velocity_profile.py`. Actuator disabled throughout;
@@ -99,10 +105,13 @@ Two producers, both single-CSV-per-run:
 | `bidirectional_sweep_20260817_204335.csv.gz` | `useful_tools/Bidirectional_sweep.py` | 2026-08-17, second sweep |
 | `position_sweep_FINAL_20260804_203506.csv.gz` | `useful_tools/position_hold_characterization.py` | 2026-08-04, single-direction only (friction and spring torque are confounded in this file — see `Bidirectional_sweep.py`'s own docstring) |
 
-### `cyclictest/` — stock-kernel latency baselines
-Idle/loaded PREEMPT-style latency measurements taken 2026-07-18. **Kernel was
-stock at the time, not yet PREEMPT_RT** — these are baseline numbers, not
-RT-kernel results.
+### `cyclictest/` — scheduling-latency measurements, grouped by campaign
+
+#### `cyclictest/2026-07_stock_initial/`
+Idle/loaded stock-kernel latency measurements taken 2026-07-18. **Kernel was
+stock at the time, not PREEMPT_RT**, so these are baseline numbers, not
+RT-kernel results. The protocol differs from 2026-09 (100k cycles per
+thread, different load), so they are not directly comparable with it.
 
 | File | Notes |
 |---|---|
@@ -111,6 +120,17 @@ RT-kernel results.
 | `loaded_v220260718_021707.log` | `cyclictest` histogram, loaded system, second run |
 | `Initial_Cyclic_Values.txt` | Summary of `cyclictest -t` output across 500Hz/800Hz idle/loaded conditions |
 | `README.md` | Short human-written note recording max-latency numbers for the above runs |
+
+#### `cyclictest/2026-09_stock_vs_rt/`
+Stock vs PREEMPT_RT comparison on the same 6.18.50 source, 800 Hz interval,
+10-minute idle and loaded runs. `README.md` here is identical to the one on
+`main` and holds the results and percentile table.
+
+| Folder / file | Notes |
+|---|---|
+| `README.md` | Protocol and results summary (stock done, RT pending) |
+| `stock_6.18.50/` | Stock `6.18.50+rpt-rpi-v8`, recorded 2026-09-24: idle and loaded histograms, conditions snapshots, and a README with the full test record (commands, clock lock, power, background processes, percentiles) |
+| `rt_6.18.50-v8-rt1/` | PREEMPT_RT `6.18.50-v8-rt1`: placeholder README, runs pending |
 
 ### Other
 

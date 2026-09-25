@@ -19,6 +19,25 @@ Each thread completed ~480,000 cycles (10 min × 800 Hz). Summary lines are at
 the bottom of each `cyclictest_*.txt`; the rest of each file is the
 per-microsecond histogram (0–9999 µs, one column per CPU).
 
+### Percentiles
+
+Computed from the committed histograms (1 µs bins; a percentile is the
+smallest latency whose cumulative count reaches that fraction of the
+samples). "≥ 1250" counts samples that took at least one full 800 Hz period.
+
+| Run | CPU | p99 | p99.9 | p99.99 | Max | ≥ 1250 µs |
+|---|---|---|---|---|---|---|
+| Idle   | 0 | 10  | 17  | 32  | 103  | 0 |
+| Idle   | 1 | 10  | 17  | 34  | 81   | 0 |
+| Idle   | 2 | 10  | 18  | 39  | 98   | 0 |
+| Idle   | 3 | 10  | 17  | 29  | 79   | 0 |
+| Loaded | 0 | 125 | 179 | 413 | 981  | 0 |
+| Loaded | 1 | 91  | 133 | 390 | 1296 | 1 |
+| Loaded | 2 | 62  | 95  | 427 | 1321 | 1 |
+| Loaded | 3 | 70  | 101 | 436 | 1430 | 1 |
+
+Loaded total ≥ 1250 µs: 3 samples out of ~1.92 million. Idle: none.
+
 ## System
 
 - **Hardware:** Raspberry Pi 4 Model B Rev 1.5, 8 GB (7.6 GiB usable)
@@ -26,17 +45,35 @@ per-microsecond histogram (0–9999 µs, one column per CPU).
   (Debian package `linux-image-6.18.50+rpt-rpi-v8`, source commit
   `cff533aec2fa601846766b32ff57204e0a61bed7` of raspberrypi/linux; `CONFIG_PREEMPT=y`, `CONFIG_HZ=250`)
 - **Tools:** cyclictest V 2.60 (rt-tests), stress-ng 0.19.02
-- **CPU clock:** locked at 1.2 GHz on all four cores (`scaling_min_freq` = `scaling_max_freq` = 1200000 kHz;
-  hardware max is 1.8 GHz), governor `performance`.
-  <!-- TODO: add the exact command used to set the lock/governor -->
-- **Power:** <!-- TODO: confirm — USB-C directly to the Pi, or USB-C into the UPS HAT? -->
-  The UPS HAT was in the power path for both runs: `ups-monitor.service` logged
-  "Fast Charging state", pack at ~16.81 V, reaching 100 % at 23:12.
+- **CPU clock:** locked at 1.2 GHz on all four cores (hardware max is 1.8 GHz).
+  Set through cpufreq sysfs on `cpu0`, in this order: governor
+  `performance`, then `scaling_max_freq` = 1200000, then `scaling_min_freq` =
+  1200000. All four cores share one cpufreq policy (`policy0`,
+  `related_cpus` = 0 1 2 3), so setting `cpu0` locks all of them; verified by
+  all four cores reading 1200000 in `conditions_before_idle.txt`. No script
+  for this was saved (`~/lock_clock.sh` does not exist); equivalent commands:
+
+  ```
+  echo performance | sudo tee /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+  echo 1200000     | sudo tee /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+  echo 1200000     | sudo tee /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
+  ```
+- **Power:** USB-C into the UPS HAT (E); the HAT powers the Pi through its
+  pogo pins. VBUS read nonzero before the runs, so external power was
+  present. During both runs `ups-monitor.service` logged "Fast Charging
+  state", pack at ~16.81 V, reaching 100 % at 23:12.
 - **Physical setup:** Pi out of its case, no heatsink, no fan.
-- **Background processes (part of the "idle" condition — keep identical for the RT runs):**
-  `ups-monitor.service` (Python, polls the UPS over I²C, ~6–7 log lines/s),
-  VS Code remote server + extension host, GitHub Copilot runtime, sshd.
-  Full process list at start: `conditions_before_idle.txt`.
+- **Background processes (part of the "idle" condition — the RT runs must match):**
+  - `ups-monitor.service` (Python, polls the UPS over I²C, ~6–7 log lines/s)
+  - **two** VS Code server builds running side by side, `7debcd0e2acdea1c52de81bf9ee1620444407dda`
+    (server-main, extension host, pty host, file watcher) and
+    `2242ebbb54efeeb0129e08e919e7e8d43033cd83` (server-main, agent host)
+  - the GitHub Copilot runtime (`copilot-sdk-linux-arm64`, under the `2242ebb…` build)
+  - sshd sessions
+
+  Full process list at start: `conditions_before_idle.txt`. For the RT runs,
+  connect the same way so the same set is running, and capture the process
+  list again to confirm.
 
 ## Test commands (exactly as run, from the system journal)
 
