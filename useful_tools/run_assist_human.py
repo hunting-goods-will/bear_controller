@@ -194,7 +194,11 @@ def main():
                          'tau_gravity', 'tau_residual', 'tau_requested',
                          'iq_requested', 'iq_applied', 'iq_measured',
                          'joint_scale', 'saturated', 'vel_derivative',
-                         'vel_ok', 'w_temp', 'p_temp', 'err'])
+                         'vel_ok', 'w_temp', 'p_temp', 'err',
+                         # Run conditions, repeated on every row so the log
+                         # records its own configuration and can't be read
+                         # against the wrong constants later.
+                         'alpha', 'k_f', 'arm_mass_kg', 'arm_com_m'])
 
             t0 = time.monotonic()
             t_prev = t0
@@ -265,6 +269,8 @@ def main():
                     f"{iq_meas:.4f}", f"{jscale:.3f}", d['saturated'],
                     f"{vel_deriv:.5f}" if vel_deriv is not None else '', vel_ok,
                     f"{w:.1f}", f"{p:.1f}", err,
+                    f"{args.alpha:.4f}", f"{args.kf:.4f}",
+                    f"{arm_m:.4f}", f"{arm_L:.4f}",
                 ])
 
                 if n % 100 == 0:

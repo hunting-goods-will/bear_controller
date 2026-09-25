@@ -10,8 +10,22 @@ steady-state windows -- so the model has never actually been validated against
 anything. This produces those windows.
 
 It also removes the need to hold the arm. Position Mode holds it against the
-load, so there is no drop risk and no repeated slamming of 1.5 kg at 274 mm
-into the bracket stop.
+load, so there is no drop risk and no repeated slamming of the load into the
+bracket stop.
+
+USAGE
+-----
+The load on the rig is REQUIRED on the command line -- there is no default:
+
+    python3 useful_tools/validate_model.py --arm-mass-kg 0 --arm-com-m 0.2739      # bare rig
+    python3 useful_tools/validate_model.py --arm-mass-kg 1.5025 --arm-com-m 0.2739 # wrench
+
+It used to be hardcoded (1.5025 kg). A bare-rig run logged with that constant
+(model_validation_20260820_234335) was misdiagnosed as a sign-mismatch anomaly
+because its logged tau_gravity/residual_predicted assumed a load that was not
+fitted. The load is now also written into every CSV row (arm_mass_kg,
+arm_com_m), so a log always states the conditions it was predicted under.
+Arguments are parsed before anything connects to the actuator.
 
 WHAT IS ACTUALLY BEING VALIDATED
 --------------------------------
@@ -30,7 +44,7 @@ Sweeping both directions and averaging cancels friction, exactly as in the
 bidirectional sweep. The comparison of predicted vs measured residual is the
 first real test of phi, the spring table, the gravity model, and KT together.
 
-FALSIFIABLE PREDICTION
+FALSIFIABLE PREDICTION (wrench fitted, --arm-mass-kg 1.5025)
 ----------------------
 With the wrench fitted, residual is POSITIVE (unlike every prior sweep, where
 the bare rig made it negative and iq_hold was negative throughout). Measured iq
@@ -41,6 +55,7 @@ load is not what we think or the sign convention is inverted.
 NO TORQUE IS COMMANDED BY THE CONTROLLER. The assist model computes and logs
 only. Position Mode does the driving.
 """
+import argparse
 import csv
 import math
 import os
@@ -52,8 +67,20 @@ from main_controller.controller import (
     AssistController, KT, actuator_to_vest_deg, tau_gravity_total)
 
 # --- Load under test --------------------------------------------------------
-ARM_MASS_KG = 1.5025
-ARM_COM_M = 0.2739
+# Required flags, no defaults (see USAGE). Parsed here, at the top, BEFORE
+# BearInterface() below opens the serial port: check the inputs first, touch
+# the hardware second.
+_ap = argparse.ArgumentParser(
+    description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+_ap.add_argument('--arm-mass-kg', type=float, required=True,
+                 help='mass of the load actually fitted, kg (0 for bare rig)')
+_ap.add_argument('--arm-com-m', type=float, required=True,
+                 help='distance from pivot to the load CoM, m')
+_args = _ap.parse_args()
+if _args.arm_mass_kg < 0 or _args.arm_com_m < 0:
+    _ap.error("--arm-mass-kg and --arm-com-m must be >= 0")
+ARM_MASS_KG = _args.arm_mass_kg
+ARM_COM_M = _args.arm_com_m
 
 # --- Sweep ------------------------------------------------------------------
 TOP_DEG = 108.0
@@ -92,8 +119,9 @@ TRACKING_ABORT = math.radians(15.0)   # goal vs actual divergence
 # wherever it is, and the first goal is clamped into range.
 HARD_STOP_DEG = 119.5
 
-# Park before disabling. Disabling at height drops 1.5 kg on a 274 mm lever
-# into the bottom bracket stop. Park low first, then release.
+# Park before disabling. Disabling at height drops the load (1.5 kg on a
+# 274 mm lever with the wrench) into the bottom bracket stop. Park low first,
+# then release.
 PARK_DEG = 24.0
 PARK_VELOCITY = 0.15
 
@@ -188,6 +216,7 @@ def run_leg(writer, f, label, start, target, temps):
             f"{d['tau_spring']:.4f}" if d['tau_spring'] is not None else '',
             f"{d['tau_gravity']:.4f}" if d['tau_gravity'] is not None else '',
             f"{ramp:.3f}", f"{temps['w']:.1f}", f"{temps['p']:.1f}",
+            f"{ARM_MASS_KG:.4f}", f"{ARM_COM_M:.4f}",
         ])
 
         # Bin every fully-ramped sample. Previously this required
@@ -305,7 +334,8 @@ try:
         writer = csv.writer(f)
         writer.writerow(['t', 'leg', 'goal_deg', 'act_deg', 'vest_deg', 'vel_rad_s',
                          'iq_measured', 'residual_measured', 'residual_predicted',
-                         'tau_spring', 'tau_gravity', 'ramp', 'w_temp', 'p_temp'])
+                         'tau_spring', 'tau_gravity', 'ramp', 'w_temp', 'p_temp',
+                         'arm_mass_kg', 'arm_com_m'])
 
         cur = run_leg(writer, f, 'down', pos, math.radians(TOP_DEG), temps) \
             if math.degrees(pos) > TOP_DEG else pos

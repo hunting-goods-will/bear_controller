@@ -8,7 +8,7 @@ analyzers:
 
 --- analyze_human_run.py ---
 
-File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260821_002111.csv
+File: raw-data:logs/human_live_csvs/human_live_20260821_002111.csv.gz  (git show raw-data:logs/human_live_csvs/human_live_20260821_002111.csv.gz | gunzip)
 19961 samples over 60.0s at 333 Hz
 Angle range: act -0.4 to 95.7  (vest 71.6 to 167.7)
 
@@ -71,7 +71,7 @@ Angle range: act -0.4 to 95.7  (vest 71.6 to 167.7)
 
 --- analyze_assist_run.py ---
 
-File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/human_live_20260821_002111.csv
+File: raw-data:logs/human_live_csvs/human_live_20260821_002111.csv.gz  (git show raw-data:logs/human_live_csvs/human_live_20260821_002111.csv.gz | gunzip)
 Rows 19961   duration 60.0s   mean rate 332.7 Hz
 Commanded torque at any point: YES (live)
 

@@ -6,7 +6,7 @@ analyzer:         useful_tools/Analyse_velocity_profile.py @ 2b2753e
 
 --- Analyse_velocity_profile.py ---
 
-File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/velocity_profile_20260818_002929.csv
+File: raw-data:logs/velocity_profile_csvs/velocity_profile_20260818_002929.csv.gz  (git show raw-data:logs/velocity_profile_csvs/velocity_profile_20260818_002929.csv.gz | gunzip)
 Blocks: 19   Samples: 70596
 Worst non-intentional velocity observed: 0.6528 rad/s
 

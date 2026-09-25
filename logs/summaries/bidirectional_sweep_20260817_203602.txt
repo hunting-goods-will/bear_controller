@@ -6,7 +6,7 @@ analyzer:         useful_tools/analyze_bidirectional_sweep.py @ 1971900
 
 --- analyze_bidirectional_sweep.py ---
 
-File: /tmp/claude-1000/-home-samuel-projects-bear-controller/404b2665-417a-4585-a6ae-277357fe248e/scratchpad/decomp/bidirectional_sweep_20260817_203602.csv
+File: raw-data:logs/spring_characterization/bidirectional_sweep_20260817_203602.csv.gz  (git show raw-data:logs/spring_characterization/bidirectional_sweep_20260817_203602.csv.gz | gunzip)
 Bare-rig assumption: gravity from RIG_MGL=1.1012 Nm only (no arm/wrench load)
 Rows used: 22
 
