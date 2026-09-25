@@ -83,3 +83,11 @@ The two runs were not perfectly matched. The RT run had no VS Code server
 or Copilot running, started idle about 8 °C cooler, and ran stress-ng from
 the same shell. Each condition was measured once for 10 minutes. See
 `rt_6.18.50-v8-rt1/README.md` for the full interpretation and its limits.
+
+## Planned
+
+- **Rerun stock 6.18.50 without VS Code** before these numbers are used in a
+  paper: no VS Code server or Copilot running (plain SSH + tmux only), with an
+  identical protocol, saved as `stock_6.18.50_no_vscode/`. Reason: the RT run
+  had no VS Code while stock had two VS Code servers plus Copilot, a confound
+  that favors RT.

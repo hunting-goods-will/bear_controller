@@ -1,7 +1,7 @@
 source file:      logs/model_validation_csvs/model_validation_20260820_234335.csv.gz
 source branch:    raw-data (git show raw-data:logs/model_validation_csvs/model_validation_20260820_234335.csv.gz | gunzip)
 date generated:   2026-09-25
-analyzer:         useful_tools/extract_spring.py @ the commit that added this summary (parent c043c24), run with --arm-mass-kg 0
+analyzer:         useful_tools/extract_spring.py @ 3ab589d, run with --arm-mass-kg 0
 ==============================================================================
 
 NOTE: logged prediction used wrong load constant; recomputed as bare rig.

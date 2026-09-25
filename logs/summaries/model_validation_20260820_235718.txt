@@ -1,7 +1,7 @@
 source file:      logs/model_validation_csvs/model_validation_20260820_235718.csv.gz
 source branch:    raw-data (git show raw-data:logs/model_validation_csvs/model_validation_20260820_235718.csv.gz | gunzip)
 date generated:   2026-09-25
-analyzer:         useful_tools/extract_spring.py @ the commit that added this summary (parent c043c24)
+analyzer:         useful_tools/extract_spring.py @ 3ab589d
 ==============================================================================
 
 NOTE: IN-SAMPLE. The current TAU_SPRING_TABLE in controller.py was extracted
