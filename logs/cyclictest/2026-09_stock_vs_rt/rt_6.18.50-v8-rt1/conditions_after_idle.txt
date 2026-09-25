@@ -1,0 +1,24 @@
+Fri 25 Sep 12:12:27 MDT 2026
+6.18.50-v8-rt1
+ 12:12:27 up 24 min,  2 users,  load average: 0.01, 0.02, 0.00
+40407
+throttled=0x0
+1200000
+1200000
+1200000
+1200000
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+samuel      1057  200  0.0   9112  3828 pts/1    R+   12:12   0:00 ps aux --sort=-%cpu
+root           1  0.1  0.1  25180 14336 ?        Ss   11:48   0:01 /sbin/init
+root          14  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/0]
+root          46  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/3]
+root          30  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/1]
+root          38  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/2]
+root         323  0.0  0.1  26728 11708 ?        Ss   11:48   0:01 /usr/lib/systemd/systemd-journald
+root         117  0.0  0.0      0     0 ?        S    11:48   0:00 [irq/40-mmc1]
+root          84  0.0  0.0      0     0 ?        I<   11:48   0:00 [kworker/u17:0-brcmf_wq/mmc1:0001:1]
+root         681  0.0  0.2 342116 19804 ?        Ssl  11:48   0:00 /usr/sbin/NetworkManager --no-daemon
+samuel       902  0.0  0.0  21716  7224 ?        S    11:49   0:00 sshd-session: samuel@pts/0
+root         383  0.0  0.1  35304 10304 ?        Ss   11:48   0:00 /usr/lib/systemd/systemd-udevd
+root         119  0.0  0.0      0     0 ?        S    11:48   0:00 [irq/40-mmc0]
+message+     630  0.0  0.0   8480  4456 ?        Ss   11:48   0:00 /usr/bin/dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only

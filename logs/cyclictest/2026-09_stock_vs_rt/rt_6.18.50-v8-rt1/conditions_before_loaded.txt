@@ -1,0 +1,24 @@
+Fri 25 Sep 14:47:53 MDT 2026
+6.18.50-v8-rt1
+ 14:47:53 up  2:59,  2 users,  load average: 0.00, 0.02, 0.00
+40894
+throttled=0x0
+1200000
+1200000
+1200000
+1200000
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+samuel      1254  200  0.0   9112  3812 pts/1    R+   14:47   0:00 ps aux --sort=-%cpu
+root         323  0.0  0.3  50800 31064 ?        Ss   11:48   0:04 /usr/lib/systemd/systemd-journald
+root         117  0.0  0.0      0     0 ?        S    11:48   0:02 [irq/40-mmc1]
+root          84  0.0  0.0      0     0 ?        I<   11:48   0:02 [kworker/u17:0-brcmf_wq/mmc1:0001:1]
+root          14  0.0  0.0      0     0 ?        S    11:48   0:02 [ksoftirqd/0]
+root           1  0.0  0.1  25180 14336 ?        Ss   11:48   0:02 /sbin/init
+root          46  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/3]
+root          30  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/1]
+root          38  0.0  0.0      0     0 ?        S    11:48   0:01 [ksoftirqd/2]
+root        1229  0.0  0.0      0     0 ?        I    14:35   0:00 [kworker/0:2-mm_percpu_wq]
+root         681  0.0  0.2 342116 19816 ?        Ssl  11:48   0:01 /usr/sbin/NetworkManager --no-daemon
+samuel       850  0.0  0.1  17076  8596 ?        Ss   11:48   0:01 /usr/bin/python3 /home/samuel/projects/ups_hat/UPS_HAT_E/ups.py
+root         119  0.0  0.0      0     0 ?        S    11:48   0:01 [irq/40-mmc0]
+root          15  0.0  0.0      0     0 ?        S    11:48   0:00 [ktimers/0]

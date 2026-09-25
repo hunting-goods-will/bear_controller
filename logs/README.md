@@ -128,9 +128,9 @@ Stock vs PREEMPT_RT comparison on the same 6.18.50 source, 800 Hz interval,
 
 | Folder / file | Notes |
 |---|---|
-| `README.md` | Protocol and results summary (stock done, RT pending) |
+| `README.md` | Protocol, results for both kernels, and the stock-vs-RT comparison |
 | `stock_6.18.50/` | Stock `6.18.50+rpt-rpi-v8`, recorded 2026-09-24: idle and loaded histograms, conditions snapshots, and a README with the full test record (commands, clock lock, power, background processes, percentiles) |
-| `rt_6.18.50-v8-rt1/` | PREEMPT_RT `6.18.50-v8-rt1`: placeholder README, runs pending |
+| `rt_6.18.50-v8-rt1/` | PREEMPT_RT `6.18.50-v8-rt1`, recorded 2026-09-25: idle and loaded histograms, stress-ng log, four conditions snapshots, and a README with the full test record, results interpretation and procedural differences from stock |
 
 ### Other
 
