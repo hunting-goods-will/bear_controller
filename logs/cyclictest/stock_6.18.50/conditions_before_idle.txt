@@ -1,0 +1,24 @@
+Thu 24 Sep 22:49:07 MDT 2026
+6.18.50+rpt-rpi-v8
+ 22:49:07 up 35 min,  3 users,  load average: 0.01, 0.77, 0.77
+49660
+throttled=0x0
+1200000
+1200000
+1200000
+1200000
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+samuel      2662  200  0.0   9112  3840 pts/0    R+   22:49   0:00 ps aux --sort=-%cpu
+samuel      1342  0.8  2.6 9960304 211440 ?      Sl   22:15   0:17 /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/node --dns-result-order=ipv4first /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/out/bootstrap-fork --type=extensionHost --transformURIs --useHostProxy=false
+samuel      1111  0.6  2.0 1533236 160176 ?      Sl   22:15   0:13 /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/node /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/out/server-main.js --connection-token=remotessh --accept-server-license-terms --agent-host-bridge-port=46405 --agent-host-bridge-host=127.0.0.1 --start-server --enable-remote-auto-shutdown --socket-path=/tmp/code-977104b0-a04d-490b-89eb-197c63a35ba1
+samuel      1233  0.3  1.6 18273036 133356 ?     Sl   22:15   0:06 /home/samuel/.vscode-server/cli/servers/Stable-2242ebbb54efeeb0129e08e919e7e8d43033cd83/server/node /home/samuel/.vscode-server/cli/servers/Stable-2242ebbb54efeeb0129e08e919e7e8d43033cd83/server/out/bootstrap-fork --type=agentHost --logsPath /home/samuel/.vscode-server/data/logs/20260925T051509 --user-data-dir /home/samuel/.vscode-server/data --telemetry-level all
+root          67  0.2  0.0      0     0 ?        I<   22:14   0:04 [kworker/u17:0-brcmf_wq/mmc1:0001:1]
+samuel      1170  0.2  0.9 1296496 73864 ?       Sl   22:15   0:04 /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/node /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/out/bootstrap-fork --type=ptyHost --logsPath /home/samuel/.vscode-server/data/logs/20260925T051506
+samuel       934  0.1  0.2  43916 20080 ?        Sl   22:15   0:04 /home/samuel/.vscode-server/code-7debcd0e2acdea1c52de81bf9ee1620444407dda command-shell --cli-data-dir /home/samuel/.vscode-server/cli --parent-process-id 916 --on-host=127.0.0.1 --on-port
+samuel      1153  0.1  1.0 1465552 86060 ?       Sl   22:15   0:03 /home/samuel/.vscode-server/cli/servers/Stable-2242ebbb54efeeb0129e08e919e7e8d43033cd83/server/node /home/samuel/.vscode-server/cli/servers/Stable-2242ebbb54efeeb0129e08e919e7e8d43033cd83/server/out/server-main.js --socket-path /tmp/code-8aad64f2-ba70-4c8c-bd7b-197f9b4aa07f --agent-host-path /tmp/code-e39fc6cf-5250-42da-89e4-1e7954308cdd --start-server --accept-server-license-terms --enable-remote-auto-shutdown --without-connection-token
+samuel      1274  0.1  0.3 830412 26600 ?        Sl   22:15   0:02 /home/samuel/.vscode-server/cli/servers/Stable-2242ebbb54efeeb0129e08e919e7e8d43033cd83/server/node_modules/@github/copilot-sdk-linux-arm64/prebuilds/linux-arm64/copilot-runtime --headless --no-auto-update --log-level info --stdio --no-auto-login
+root           1  0.0  0.1  25036 14364 ?        Ss   22:14   0:01 /sbin/init
+samuel       875  0.0  0.0  21716  7224 ?        S    22:14   0:01 sshd-session: samuel@pts/0
+root         298  0.0  0.1  26728 12884 ?        Ss   22:14   0:01 /usr/lib/systemd/systemd-journald
+samuel       904  0.0  0.1  23184  8792 ?        S    22:15   0:01 sshd-session: samuel@notty
+samuel      1353  0.0  0.7 1262316 57688 ?       Sl   22:15   0:00 /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/node /home/samuel/.vscode-server/cli/servers/Stable-7debcd0e2acdea1c52de81bf9ee1620444407dda/server/out/bootstrap-fork --type=fileWatcher
