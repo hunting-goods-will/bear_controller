@@ -132,6 +132,21 @@ Stock vs PREEMPT_RT comparison on the same 6.18.50 source, 800 Hz interval,
 | `stock_6.18.50/` | Stock `6.18.50+rpt-rpi-v8`, recorded 2026-09-24: idle and loaded histograms, conditions snapshots, and a README with the full test record (commands, clock lock, power, background processes, percentiles) |
 | `rt_6.18.50-v8-rt1/` | PREEMPT_RT `6.18.50-v8-rt1`, recorded 2026-09-25: idle and loaded histograms, stress-ng log, four conditions snapshots, and a README with the full test record, results interpretation and procedural differences from stock |
 
+### `phase2/observer_csvs/` — Phase 2 observer excitation runs
+Producer: `useful_tools/observer_excitation.py`. Actuator drives the arm in
+Position Mode (sweep: constant-velocity down/up legs; sine: smoothstep-ramped
+sinusoid) and logs goal, position, velocity register, present_iq and
+temperatures every loop, with `loop_dt`. Every file starts with `#` header
+lines (argv, all limits, set/readback of gains and limits, park target) and
+ends with `# END:` / `# PARK:` outcome lines; read with
+`pd.read_csv(path, comment='#')`. The `# ... started` header line (time of
+enable) is the authoritative start time. Dated 2026-09-30.
+
+| File | Notes |
+|---|---|
+| `observer_sweep_bare_20260930_144400_ABORTED.csv.gz` | Bare rig, sweep at 0.10 rad/s, **aborted** on the down leg: \|present_iq\| > 4.0 A for 3 samples (4.095 A at act 59.6°). The 4.0 A threshold came from a friction-free estimate; normal bare down-leg current is 3.2–4.8 A (August `model_validation` runs), so it was raised to 5.0 A (trip 5.3 A). Run with the old park: parked LOW at 24° (up to −4.8 A pulling against the spring), and on release the bare arm sprang into the top stop. The park now goes HIGH (110°) on a bare rig. |
+| `observer_sweep_bare_20260930_150800.csv.gz` | Bare rig, sweep at 0.10 rad/s, **complete**, with the fixed settings: current abort 5.0 A ×3 / trip 5.3 A, sweep 100→30→100°, park HIGH at 110°. Peak \|present_iq\| 4.62 A. |
+
 ### Other
 
 | File | Notes |
