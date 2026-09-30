@@ -30,8 +30,11 @@ sine   goal = center + A * env(t) * sin(2*pi*f*t), sent every loop, for
        amplitude cycle). Before the sine, the arm is brought to center with a
        constant-velocity approach leg at --velocity.
 
-Both modes park low before disabling, as validate_model.py does, but the park
-is monitored: it gives up and disables immediately (the load may drop) if
+Both modes park before disabling, toward the stop the arm goes to when
+released: HIGH (PARK_HIGH_DEG) on a bare rig, where the spring wins; LOW
+(PARK_LOW_DEG, as validate_model.py) with a load, where the load wins. The
+target and the reason are printed before the Enter prompt. The park
+is monitored: it gives up and disables immediately (the arm may move) if
 |present_iq| > PARK_IQ_ABORT_A for PARK_IQ_COUNT consecutive samples, if the
 arm has not moved PARK_PROGRESS_DEG toward PARK_DEG within PARK_STALL_S, or at
 PARK_DEADLINE_S. Park samples are logged with phase='park'.
@@ -76,9 +79,17 @@ ENVELOPE_MIN_DEG = 20.0      # the excitation trajectory must stay inside this
 ENVELOPE_MAX_DEG = 100.0
 MAX_GOAL_VELOCITY = 0.8      # rad/s, peak goal velocity anywhere in the run
 RUN_CAP_S = 120.0            # s, enable-to-end (park not included)
-IQ_ABORT_A = 4.0             # A, |present_iq| sustained abort threshold...
+# Current aborts. Set from MEASURED bare-rig current, not a friction-free
+# estimate: the first run (observer_sweep_bare_20260930_144400) tripped the
+# old 4.0 A threshold at 4.095 A, act 59.6 deg, on a normal down leg.
+# August bare sweeps model_validation_20260820_234335 / _235718, steady-state
+# down leg, max |iq| per 10 deg bin: 20 deg 4.76/4.82, 30 deg 4.65/4.67,
+# 40 deg 4.51/4.53, 60 deg 4.20/4.43 A (down legs overall 3.2-4.8 A; up legs
+# <= 3.1 A). Wrench up leg predicted ~4.5 A with friction. Firmware
+# limit_i_max stays 5.5 A (LIMIT_I_MAX below).
+IQ_ABORT_A = 5.0             # A, |present_iq| sustained abort threshold...
 IQ_ABORT_COUNT = 3           # ...for this many consecutive samples
-IQ_TRIP_A = 5.0              # A, |present_iq| immediate abort (one sample)
+IQ_TRIP_A = 5.3              # A, |present_iq| immediate abort (one sample)
 MIN_SOFT_START_S = 0.3       # s, floor on --soft-start-s
 MIN_CONST_SPAN_DEG = 20.0    # deg, sweep legs must have this much at full speed
 
@@ -130,7 +141,8 @@ if not SOFT_START >= MIN_SOFT_START_S:
 
 # --- Sweep (validate_model.py's legs, clipped to the envelope) --------------
 SWEEP_TOP_DEG = 100.0
-SWEEP_BOTTOM_DEG = 20.0
+SWEEP_BOTTOM_DEG = 30.0      # was 20: bare down-leg |iq| peaks ~4.8 A at 20
+                             # deg vs ~4.65 A at 30 (see IQ_ABORT_A)
 DECEL_RAD = VELOCITY * SOFT_START   # distance over which to decelerate
 RAMP_FLOOR = 0.15            # minimum ramp; without it the step decays to zero
 ARRIVE_EPS = math.radians(0.5)
@@ -166,8 +178,24 @@ READBACK_RTOL, READBACK_ATOL = 1e-4, 1e-6
 # Start above MAX_ANGLE with a load: same handling as validate_model.py.
 HARD_STOP_DEG = 119.5
 
-# Park before disabling: same as validate_model.py.
-PARK_DEG = 24.0
+# Park before disabling, TOWARD THE STOP THE ARM GOES TO WHEN RELEASED, so the
+# release is a short move into the stop it would reach anyway:
+#  * bare rig (arm_mass_kg == 0): the spring beats rig gravity everywhere, so a
+#    released arm springs UP into the top stop (115-119 deg). Park HIGH. The
+#    first run parked a bare arm low at 24 deg (drawing up to -4.8 A to pull it
+#    down against the spring) and it sprang the full range into the top stop.
+#  * loaded: the load beats the spring and a released arm drops into the
+#    bottom stop. Park LOW, as validate_model.py does.
+PARK_HIGH_DEG = 110.0        # below MAX_ANGLE (118)
+PARK_LOW_DEG = 24.0
+if ARM_MASS_KG == 0:
+    PARK_DEG, PARK_DIR = PARK_HIGH_DEG, +1.0
+    PARK_WHY = ("bare rig (arm_mass_kg == 0): the spring beats rig gravity "
+                "everywhere, so a released arm springs UP into the top stop")
+else:
+    PARK_DEG, PARK_DIR = PARK_LOW_DEG, -1.0
+    PARK_WHY = (f"loaded (arm_mass_kg = {ARM_MASS_KG}): the load beats the "
+                f"spring, so a released arm drops DOWN into the bottom stop")
 PARK_VELOCITY = 0.15
 PARK_DEADLINE_S = 20.0       # s, give up and release (validate_model: 60)
 PARK_IQ_ABORT_A = 5.0        # A, release if |present_iq| exceeds this...
@@ -203,8 +231,9 @@ ENV_MIN = math.radians(ENVELOPE_MIN_DEG)
 ENV_MAX = math.radians(ENVELOPE_MAX_DEG)
 if not (MIN_ANGLE < ENV_MIN < ENV_MAX < MAX_ANGLE):
     raise SystemExit("REFUSED: envelope is not inside config MIN/MAX_ANGLE.")
-if not ENVELOPE_MIN_DEG <= PARK_DEG <= ENVELOPE_MAX_DEG:
-    raise SystemExit("REFUSED: PARK_DEG is outside the envelope.")
+if not MIN_ANGLE < math.radians(PARK_DEG) < MAX_ANGLE:
+    raise SystemExit(f"REFUSED: park target {PARK_DEG} deg is not strictly "
+                     f"inside MIN_ANGLE..MAX_ANGLE.")
 
 if MODE == 'sine':
     if _args.freq_hz is None:
@@ -426,10 +455,13 @@ def run_sine(writer):
 
 
 def park_and_disable(f, writer):
-    """Bring the load down under control, THEN disable. Disabling at height
-    drops the load into the bottom stop, so this runs on every exit path once
-    enable was attempted. Unlike validate_model.py the park is monitored and
-    disables IMMEDIATELY -- the load may drop -- if:
+    """Move under control toward the stop the arm goes to when released
+    (PARK_DIR: up for a bare rig, down with a load), THEN disable, so the
+    release is a short move into that stop. Runs on every exit path once
+    enable was attempted. If the arm is already at or past PARK_DEG in
+    PARK_DIR it releases directly -- driving it back would only lengthen the
+    move into the stop. The park is monitored and disables IMMEDIATELY --
+    the arm may move into its stop -- if:
       * |present_iq| > PARK_IQ_ABORT_A for PARK_IQ_COUNT consecutive samples,
       * the arm has not moved PARK_PROGRESS_DEG toward PARK_DEG in PARK_STALL_S,
       * PARK_DEADLINE_S passes,
@@ -441,23 +473,28 @@ def park_and_disable(f, writer):
     try:
         pos, vel, iq, _ = read()
         target = math.radians(PARK_DEG)
-        if pos <= target + math.radians(1.0):
-            print("Already low. Releasing.")
+        # Signed distance still to travel toward the target, in PARK_DIR.
+        if (target - pos) * PARK_DIR <= math.radians(1.0):
+            print(f"Already at/past the park target ({PARK_DEG:.0f} deg, "
+                  f"{'up' if PARK_DIR > 0 else 'down'}). Releasing.")
             parked = True
         else:
-            print(f"Parking from {math.degrees(pos):.1f} to {PARK_DEG:.0f} deg "
-                  f"before release...")
+            print(f"Parking {'UP' if PARK_DIR > 0 else 'DOWN'} from "
+                  f"{math.degrees(pos):.1f} to {PARK_DEG:.0f} deg before "
+                  f"release...")
             goal = pos
             now = time.monotonic()
             t_prev = now
             deadline = now + PARK_DEADLINE_S
             ref_pos, ref_t = pos, now     # progress-watchdog reference
             iq_over = 0
-            while goal > target:
+            while (target - goal) * PARK_DIR > 0:
                 now = time.monotonic()
                 dt = now - t_prev
                 t_prev = now
-                goal = max(target, goal - PARK_VELOCITY * dt)
+                goal += PARK_DIR * PARK_VELOCITY * dt
+                if (goal - target) * PARK_DIR > 0:     # never step past target
+                    goal = target
                 iface.bear.set_goal_position((iface.id, goal))
                 pos, vel, iq, _ = read()
                 if writer is not None:
@@ -468,7 +505,7 @@ def park_and_disable(f, writer):
                     release = (f"|present_iq| > {PARK_IQ_ABORT_A} A for "
                                f"{iq_over} consecutive samples during park")
                     break
-                if ref_pos - pos > math.radians(PARK_PROGRESS_DEG):
+                if (pos - ref_pos) * PARK_DIR > math.radians(PARK_PROGRESS_DEG):
                     ref_pos, ref_t = pos, now
                 elif now - ref_t > PARK_STALL_S:
                     release = (f"no {PARK_PROGRESS_DEG:.0f} deg of progress "
@@ -489,7 +526,8 @@ def park_and_disable(f, writer):
             release = "park interrupted"
         if release is not None:
             print(f"\nRELEASING EARLY: {release}.\n"
-                  f"THE LOAD MAY DROP -- support the arm.")
+                  f"{'THE ARM MAY SPRING UP INTO THE TOP STOP' if PARK_DIR > 0 else 'THE LOAD MAY DROP INTO THE BOTTOM STOP'}"
+                  f" -- support the arm.")
         # Disable before touching the log: a failed write must not block it.
         iface.disable()
         if f is not None:
@@ -557,6 +595,8 @@ try:
     print(f"\nPlanned run {planned_s:.0f}s (approach {approach_s:.0f}s + "
           f"{MODE} {EXCITE_S:.0f}s), cap {RUN_CAP_S:.0f}s. Peak goal velocity "
           f"{peak_v:.3f} rad/s.\nKeep a hand near the arm but do NOT support it.")
+    print(f"\nPARK: {'HIGH' if PARK_DIR > 0 else 'LOW'} at {PARK_DEG:.0f} deg, "
+          f"then disable.\n  Why: {PARK_WHY}.")
     input("Press Enter to enable and begin: ")
 
     # Re-read: the arm may have moved while waiting at the prompt, and
@@ -587,7 +627,8 @@ try:
             f"tracking_abort_deg={math.degrees(TRACKING_ABORT):.1f} "
             f"loop_period_s={LOOP_PERIOD_S} const_span_deg="
             f"{'' if CONST_SPAN_DEG is None else f'{CONST_SPAN_DEG:.1f}'}\n")
-    f.write(f"# park: deg={PARK_DEG} velocity={PARK_VELOCITY} "
+    f.write(f"# park: deg={PARK_DEG} dir={'up' if PARK_DIR > 0 else 'down'} "
+            f"velocity={PARK_VELOCITY} "
             f"deadline_s={PARK_DEADLINE_S} iq_abort_a={PARK_IQ_ABORT_A}x"
             f"{PARK_IQ_COUNT} progress={PARK_PROGRESS_DEG}deg/{PARK_STALL_S}s\n")
     f.write(f"# start_pos_deg={math.degrees(pos):.3f} "
