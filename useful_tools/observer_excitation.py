@@ -31,9 +31,11 @@ sine   goal = center + A * env(t) * sin(2*pi*f*t), sent every loop, for
        constant-velocity approach leg at --velocity.
 
 Both modes park before disabling, toward the stop the arm goes to when
-released: HIGH (PARK_HIGH_DEG) on a bare rig, where the spring wins; LOW
-(PARK_LOW_DEG, as validate_model.py) with a load, where the load wins. The
-target and the reason are printed before the Enter prompt. The park
+released, chosen from the torque model at the low park angle:
+net = tau_spring - tau_gravity_total (controller.py, with the given load).
+net > 0 (spring wins) parks HIGH (PARK_HIGH_DEG); otherwise LOW (PARK_LOW_DEG,
+as validate_model.py). Net and the choice are printed before the port opens,
+again before the Enter prompt, and written to the CSV header. The park
 is monitored: it gives up and disables immediately (the arm may move) if
 |present_iq| > PARK_IQ_ABORT_A for PARK_IQ_COUNT consecutive samples, if the
 arm has not moved PARK_PROGRESS_DEG toward PARK_DEG within PARK_STALL_S, or at
@@ -71,6 +73,8 @@ import sys
 import time
 
 from main_controller.bear_interface import BearInterface
+from main_controller.controller import (
+    actuator_to_vest_deg, tau_gravity_total, tau_spring)
 from main_controller.config import (
     LOG_DIR, MIN_ANGLE, MAX_ANGLE, TEMP_WARN, TEMP_MAX, SAFETY_CHECKS_CONFIRMED)
 
@@ -180,22 +184,39 @@ HARD_STOP_DEG = 119.5
 
 # Park before disabling, TOWARD THE STOP THE ARM GOES TO WHEN RELEASED, so the
 # release is a short move into the stop it would reach anyway:
-#  * bare rig (arm_mass_kg == 0): the spring beats rig gravity everywhere, so a
-#    released arm springs UP into the top stop (115-119 deg). Park HIGH. The
-#    first run parked a bare arm low at 24 deg (drawing up to -4.8 A to pull it
-#    down against the spring) and it sprang the full range into the top stop.
-#  * loaded: the load beats the spring and a released arm drops into the
-#    bottom stop. Park LOW, as validate_model.py does.
+#  * net = tau_spring - tau_gravity_total at the LOW park angle (controller.py
+#    torque model, with the load given on the command line).
+#  * net > 0: the spring wins, a released arm rises into the top stop
+#    (115-119 deg). Park HIGH.
+#  * net <= 0: the load wins, a released arm drops into the bottom stop.
+#    Park LOW, as validate_model.py does.
+# Decided from the model, not from arm_mass_kg == 0: light payloads (278 g /
+# 431 g / 709 g wrenches, m*g*r ~0.7-1.95 Nm) can still lose to the spring at
+# the low park, and would park low and spring the full range into the top
+# stop -- as the bare arm did on the first run (observer_sweep_bare_
+# 20260930_144400: parked at 24 deg, drawing up to -4.8 A against the spring).
 PARK_HIGH_DEG = 110.0        # below MAX_ANGLE (118)
 PARK_LOW_DEG = 24.0
-if ARM_MASS_KG == 0:
+PARK_LOW_VEST_DEG = actuator_to_vest_deg(math.radians(PARK_LOW_DEG))  # 96
+PARK_SPRING_NM = tau_spring(PARK_LOW_VEST_DEG)
+if PARK_SPRING_NM is None:
+    # Outside the characterized table: no model answer, so no park direction.
+    raise SystemExit(f"REFUSED: vest {PARK_LOW_VEST_DEG:.1f} deg (low park) is "
+                     f"outside TAU_SPRING_TABLE; cannot choose a park direction.")
+PARK_GRAVITY_NM = tau_gravity_total(PARK_LOW_VEST_DEG, ARM_MASS_KG, ARM_COM_M)
+PARK_NET_NM = PARK_SPRING_NM - PARK_GRAVITY_NM
+if PARK_NET_NM > 0:
     PARK_DEG, PARK_DIR = PARK_HIGH_DEG, +1.0
-    PARK_WHY = ("bare rig (arm_mass_kg == 0): the spring beats rig gravity "
-                "everywhere, so a released arm springs UP into the top stop")
+    PARK_WHY = "spring wins at the low park, a released arm RISES into the top stop"
 else:
     PARK_DEG, PARK_DIR = PARK_LOW_DEG, -1.0
-    PARK_WHY = (f"loaded (arm_mass_kg = {ARM_MASS_KG}): the load beats the "
-                f"spring, so a released arm drops DOWN into the bottom stop")
+    PARK_WHY = "load wins at the low park, a released arm DROPS into the bottom stop"
+PARK_SUMMARY = (
+    f"{'HIGH' if PARK_DIR > 0 else 'LOW'} at {PARK_DEG:.0f} deg -- net = "
+    f"tau_spring {PARK_SPRING_NM:.3f} - tau_gravity {PARK_GRAVITY_NM:.3f} = "
+    f"{PARK_NET_NM:+.3f} Nm at act {PARK_LOW_DEG:.0f} / vest "
+    f"{PARK_LOW_VEST_DEG:.0f} deg ({ARM_MASS_KG} kg @ {ARM_COM_M} m): {PARK_WHY}")
+print(f"Park: {PARK_SUMMARY}")
 PARK_VELOCITY = 0.15
 PARK_DEADLINE_S = 20.0       # s, give up and release (validate_model: 60)
 PARK_IQ_ABORT_A = 5.0        # A, release if |present_iq| exceeds this...
@@ -595,8 +616,7 @@ try:
     print(f"\nPlanned run {planned_s:.0f}s (approach {approach_s:.0f}s + "
           f"{MODE} {EXCITE_S:.0f}s), cap {RUN_CAP_S:.0f}s. Peak goal velocity "
           f"{peak_v:.3f} rad/s.\nKeep a hand near the arm but do NOT support it.")
-    print(f"\nPARK: {'HIGH' if PARK_DIR > 0 else 'LOW'} at {PARK_DEG:.0f} deg, "
-          f"then disable.\n  Why: {PARK_WHY}.")
+    print(f"\nPARK then disable: {PARK_SUMMARY}.")
     input("Press Enter to enable and begin: ")
 
     # Re-read: the arm may have moved while waiting at the prompt, and
@@ -630,7 +650,11 @@ try:
     f.write(f"# park: deg={PARK_DEG} dir={'up' if PARK_DIR > 0 else 'down'} "
             f"velocity={PARK_VELOCITY} "
             f"deadline_s={PARK_DEADLINE_S} iq_abort_a={PARK_IQ_ABORT_A}x"
-            f"{PARK_IQ_COUNT} progress={PARK_PROGRESS_DEG}deg/{PARK_STALL_S}s\n")
+            f"{PARK_IQ_COUNT} progress={PARK_PROGRESS_DEG}deg/{PARK_STALL_S}s "
+            f"net_nm={PARK_NET_NM:+.4f} tau_spring_nm={PARK_SPRING_NM:.4f} "
+            f"tau_gravity_nm={PARK_GRAVITY_NM:.4f} "
+            f"at_vest_deg={PARK_LOW_VEST_DEG:.1f}\n")
+    f.write(f"# park choice: {PARK_SUMMARY}\n")
     f.write(f"# start_pos_deg={math.degrees(pos):.3f} "
             f"start_w_temp={S['temps']['w']:.1f} "
             f"start_p_temp={S['temps']['p']:.1f} "
