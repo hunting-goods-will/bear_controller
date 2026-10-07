@@ -148,6 +148,33 @@ enable) is the authoritative start time. Dated 2026-09-30.
 | `observer_sweep_bare_20260930_150800.csv.gz` | Bare rig, sweep at 0.10 rad/s, **complete**, with the fixed settings: current abort 5.0 A ×3 / trip 5.3 A, sweep 100→30→100°, park HIGH at 110°. Peak \|present_iq\| 4.62 A. |
 | `observer_sweep_wrench_20260930_162234.csv.gz` | Light wrench, **0.711 kg @ 0.1651 m** (per-row `arm_mass_kg`/`arm_com_m`; "wrench" in the name only means mass ≠ 0), sweep at 0.10 rad/s, **complete**, same limits as `150800`. Park chosen from the torque model: net = τ_spring 3.021 − τ_gravity 2.240 = +0.781 Nm at vest 96°, so the spring wins and it parked HIGH at 110°. Peak \|present_iq\| 2.75 A (approach leg, act 107°). |
 
+### `phase2/latency/` — serial comm-budget timing
+Producer: `useful_tools/measure_comm_budget.py` (added on `main` in
+`8738d4d`). Read-only: actuator never enabled; the only register written is
+`goal_iq = 0.0`. Times 5000 calls each (+20 warmup) of `ping`,
+`get_present_position`, `get_state` (4 single reads), `bulk_read_3`
+(pos/vel/iq), `bulk_rw_3_goal_iq0` and `bulk_rw_state4_goal_iq0` (get_state's
+four registers), with a `--gap-ms` sleep between calls outside the timed
+region. One row per call: `method, i, dt_us, ok, err, fresh_boot, sched`.
+`#` header lines record config-register readback, ping scan,
+torque_enable/goal_iq at start and end, present_position vs. the 2.0328 rad
+top stop, scheduler/affinity, xhci IRQ counts, latency_timer, and the stats
+table; read with `pd.read_csv(path, comment='#')`. Both runs log
+`git: 501db9b dirty: yes` because the script was uncommitted at the time.
+The committed `8738d4d` file is the one that ran: it was last modified at
+20:08, before either run. Dated 2026-10-06.
+
+| File | Notes |
+|---|---|
+| `comm_budget_20261006_201203.csv.gz` | SCHED_FIFO 80, CPU 3, `--gap-ms 0.5`, fresh_boot yes. **Complete**, 0 failures and 0 non-0x80 error bytes on every method; torque_enable 0 and goal_iq 0.0 at start and end. Medians: single-transaction methods 489.5–489.7 µs, get_state 3487.9 µs. Max ≤ 1397.9 µs except get_state 4273.3 µs. present_position 2.0214 rad (115.82°), −0.65° from the expected top stop. |
+| `comm_budget_20261006_203436.csv.gz` | Same as `201203` but `--gap-ms 0.25`. **Complete**, 0 failures, 0 non-0x80 error bytes. Medians: single-transaction 739.5–740.2 µs, get_state 3738.3 µs. Max: ping 2742.7, bulk_rw_state4 4119.4, get_state 5736.2 µs, others ≤ 1423.6 µs. |
+
+In both runs, single-transaction median + gap ≈ 1 ms, and get_state's median
+≈ that median + 3 × 1 ms. That fits replies being paced by a 1 ms cycle
+(FTDI `latency_timer` = 1 ms is logged in the header), so per-call medians
+here reflect the phase within that cycle, not the actuator's turnaround. No
+SCHED_OTHER (plain) run yet.
+
 ### Other
 
 | File | Notes |
