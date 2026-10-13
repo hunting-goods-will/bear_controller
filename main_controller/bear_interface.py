@@ -1,5 +1,6 @@
 from pybear import Manager
 from main_controller.config import *
+import time
 
 
 class BearInterface:
@@ -41,13 +42,24 @@ class BearInterface:
         if mode != 0:
             raise RuntimeError(f"enable refused: mode reads {mode}, not 0")
 
-        # Enable, and confirm it.
+        # Enable, and confirm it. On the bench (Oct 13) one read-back taken
+        # right after the write still showed the old value, so poll for up to
+        # 20 ms and record how long the change took to show.
         self.bear.set_torque_enable((self.id, 1))
-        (te,), _ = self.bear.get_torque_enable(self.id)[0]
-        if te != 1:
-            raise RuntimeError(f"enable failed: torque_enable reads {te}, not 1")
+        t0 = time.monotonic()
+        reads = 0
+        while True:
+            (te,), _ = self.bear.get_torque_enable(self.id)[0]
+            reads += 1
+            if te == 1:
+                break
+            if time.monotonic() - t0 > 0.020:
+                raise RuntimeError(f"enable failed: torque_enable reads {te}, "
+                                   f"not 1, after {reads} reads / 20 ms")
+        ms = (time.monotonic() - t0) * 1000
 
-        print(f"Actuator enabled in torque mode (watchdog {wd_us} µs).")
+        print(f"Actuator enabled in torque mode (watchdog {wd_us} µs; "
+              f"confirmed on read {reads}, {ms:.1f} ms).")
         return wd_us
     
     def enable_position_mode(self, initial_position):
@@ -60,10 +72,32 @@ class BearInterface:
         print("Actuator enabled in Position Mode.")
 
     def disable(self):
-        """Zero torque and disable. Always call this on shutdown."""
-        self.bear.set_goal_iq((self.id, 0.0))
-        self.bear.set_torque_enable((self.id, 0))
-        print("Actuator disabled.")
+        """Zero torque and disable. Always call this on shutdown.
+
+        Never raises (it runs inside finally: blocks). On the bench (Oct 13)
+        the torque_enable = 0 write was sometimes lost when it followed the
+        goal_iq write back-to-back, so: zero goal_iq and read it back (which
+        also spaces the writes), then write torque_enable = 0 and confirm it,
+        retrying up to 3 times. Returns True only if confirmed.
+        """
+        try:
+            self.bear.set_goal_iq((self.id, 0.0))
+            self.bear.get_goal_iq(self.id)
+            te = None
+            for attempt in range(1, 4):
+                self.bear.set_torque_enable((self.id, 0))
+                t0 = time.monotonic()
+                while time.monotonic() - t0 < 0.020:
+                    (te,), _ = self.bear.get_torque_enable(self.id)[0]
+                    if te == 0:
+                        print(f"Actuator disabled (confirmed, attempt {attempt}).")
+                        return True
+            print(f"WARNING: disable NOT confirmed (torque_enable reads {te}). "
+                  f"Cut actuator power.")
+            return False
+        except Exception as e:
+            print(f"WARNING: disable() raised {e!r}. Cut actuator power.")
+            return False
 
     def set_iq(self, iq):
         """Command a torque (current in Amps). Hard-clamped to MAX_IQ.
