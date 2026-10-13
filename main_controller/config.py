@@ -20,8 +20,9 @@ TEMP_WARN   = 65.0   # degrees C — start scaling torque back
 TEMP_MAX    = 75.0   # degrees C — zero torque above this
 
 # Firmware watchdog timeout register (see Westwood SDK Manual v1.0.1).
-# Currently 0 (off) on the actuator by default. 
-WATCHDOG_TIMEOUT_MS = None
+WATCHDOG_TIMEOUT_MS = 10 # Mode 0 only, written each run and never saved
+WATCHDOG_MIN_MS = 8 # Just above ~7.65 ms longest normal gap at 500hz
+WATCHDOG_MAX_MS = 50 # Software loop already aborts at 50 ms
 
 # --- SAFETY GATE ---
 SAFETY_CHECKS_CONFIRMED = True
