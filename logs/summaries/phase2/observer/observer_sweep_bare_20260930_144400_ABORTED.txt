@@ -1,0 +1,30 @@
+source file:      logs/phase2/observer_csvs/observer_sweep_bare_20260930_144400_ABORTED.csv.gz
+source branch:    raw-data (git show raw-data:logs/phase2/observer_csvs/observer_sweep_bare_20260930_144400_ABORTED.csv.gz | gunzip)
+date generated:   2026-10-13
+python env:       Python 3.13.5, pandas 3.0.6, numpy 2.5.4 (pandas is not in the project venv)
+analyzers:
+  - useful_tools/analyze_observer.py @ a8278ae
+command:          analyze_observer.py bench --bare observer_sweep_bare_20260930_144400_ABORTED.csv --out <dir>
+                  (plots written by the analyzer are not kept; rerun the command to regenerate them)
+==============================================================================
+
+ANALYZER DID NOT COMPLETE on this file. The run aborted on the down leg, so it
+has no up-leg samples; sweep_friction_table() needs both directions
+((up - down)/2 per angle bin) and raises KeyError: 1.0. P1 is therefore not
+evaluated. Output printed before the error:
+
+# Observer bench analysis
+bare: observer_sweep_bare_20260930_144400_ABORTED.csv
+  samples 1611, dt median 5.00 ms, vest 131.6-172.6 deg, steady 83%
+
+## P1 (limit: bin RMS <= 0.15 Nm)
+
+--- CSV '#' outcome lines (written by observer_excitation.py at run time) ---
+
+# observer_excitation.py  started 2026-09-30T14:45:07-0600
+# argv: observer_excitation.py --mode sweep --arm-mass-kg 0 --arm-com-m 0 --velocity 0.10
+# units: t s since the enable command (time.monotonic); loop_dt s; goal_pos, pos rad; vel rad/s (present_velocity register); present_iq A; w_temp, p_temp C (sampled ~1 Hz, not refreshed during park)
+# envelope_deg=20.0..100.0 max_goal_velocity=0.8 run_cap_s=120.0 iq_abort_a=4.0x3 iq_trip_a=5.0 tracking_abort_deg=15.0 loop_period_s=0.005 const_span_deg=62.8
+# park: deg=24.0 velocity=0.15 deadline_s=20.0 iq_abort_a=5.0x3 progress=1.0deg/2.0s
+# END: abort -- |present_iq| > 4.0 A for 3 consecutive samples (last 4.095 A at 59.6 deg)
+# PARK: parked

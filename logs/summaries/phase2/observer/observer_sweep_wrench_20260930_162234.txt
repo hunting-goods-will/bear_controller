@@ -1,0 +1,26 @@
+source file:      logs/phase2/observer_csvs/observer_sweep_wrench_20260930_162234.csv.gz
+source branch:    raw-data (git show raw-data:logs/phase2/observer_csvs/observer_sweep_wrench_20260930_162234.csv.gz | gunzip)
+date generated:   2026-10-13
+python env:       Python 3.13.5, pandas 3.0.6, numpy 2.5.4 (pandas is not in the project venv)
+analyzers:
+  - useful_tools/analyze_observer.py @ a8278ae
+command:          analyze_observer.py bench --bare observer_sweep_bare_20260930_150800.csv --wrench observer_sweep_wrench_20260930_162234.csv --mass-kg 0.711 --r-m 0.1651 --out <dir>
+                  (plots written by the analyzer are not kept; rerun the command to regenerate them)
+==============================================================================
+
+P2 needs a bare reference sweep; the bare sweep is 150800 (same session, same limits), so its P1 block is repeated here.
+mass/r from this file's argv (--arm-mass-kg 0.711 --arm-com-m 0.1651).
+
+# Observer bench analysis
+bare: observer_sweep_bare_20260930_150800.csv
+  samples 6084, dt median 5.00 ms, vest 101.8-172.6 deg, steady 67%
+
+## P1 (limit: bin RMS <= 0.15 Nm)
+  friction=model: bins 25, bin RMS 0.054, bin max 0.101, bin mean +0.017, sample RMS 0.141 Nm (n=4106) -> PASS
+  friction=sweep: bins 25, bin RMS 0.027, bin max 0.069, bin mean +0.021, sample RMS 0.138 Nm (n=4106) -> PASS
+  own-sweep friction: 0.815-0.943 Nm (mean 0.880); model at 0.10 rad/s: 0.889 Nm
+
+## P2 (limit: every bin within +-10 %, no trend)
+wrench: observer_sweep_wrench_20260930_162234.csv, m=0.711 kg, r=0.1651 m
+  bins 11, ratio 1.132-2.212 (mean 1.477), trend +0.1894 per 10 deg -> FAIL
+  KT_measured 0.4906 +- 0.0257 Nm/A (-26.8 % vs datasheet 0.67). NB: only as good as m*g*r.

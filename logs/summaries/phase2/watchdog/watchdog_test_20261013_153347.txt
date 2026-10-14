@@ -1,0 +1,46 @@
+source file:      logs/phase2/watchdog/watchdog_test_20261013_153347.csv.gz
+source branch:    raw-data (git show raw-data:logs/phase2/watchdog/watchdog_test_20261013_153347.csv.gz | gunzip)
+date generated:   2026-10-13
+python env:       Python 3.13.5, pandas 3.0.6, numpy 2.5.4 (pandas is not in the project venv)
+analyzers:        none -- no offline analyzer script exists for this data type.
+                  Section 1 is the CSV's own '#' header, written by the producer
+                  at run time. Section 2 is computed from the data rows
+                  (pd.read_csv(path, comment='#')) at generation time.
+producer:         useful_tools/watchdog_bench_test.py
+                  Script was edited after this run (T5 changed from a single read at
+                  ~1 ms to polling every 5 ms for up to 500 ms); the version that ran
+                  was never committed. bear_interface.py was also an uncommitted
+                  version between b789949 and 0e33864 (file mtime 17:27:47).
+==============================================================================
+
+--- 1. CSV header (pass/fail lines as printed by the script) ---
+
+# started 2026-10-13T15:33:20-0600
+# watchdog 10 ms (range 8-50)
+# loop 500 Hz; sched 0 prio 0 affinity [0, 1, 2, 3]
+# start: pos 116.49 deg, vel 0.019, iq -0.000, winding 21.8 C, limit_i_max 5.5
+# T1: PASS -- 4999 loops, no watchdog error; max dt 5.65 ms; 0 loops with dt > 10 ms
+# T2: PASS -- bit 3 SET after 12.8 ms silence (limit 12 ms + read time); error byte 0x88; torque_enable=3 (recorded)
+# T5 (after T2): FAIL -- after disable(): torque_enable=3, error byte 0x88 (need 0 and 0x80)
+# end: disabled, watchdog reset to 0 us
+
+--- 2. Computed from rows ---
+
+rows 5004, t 0.005-10.023 s, tests present: T1 T2
+
+per test: rows by action
+  T1: armed+enabled 1, exchange 4999
+  T2: silence start 1, read 1, read torque_enable 2
+
+exchange loops (one bulk packet each, 500 Hz target)
+  test     n  dt med    p99  p99.9    max >2.5ms >10ms  max|iq|   iq_sent err
+  T1    4999   2.000  2.066  2.190  5.650      4     0   0.0676         0 0x80
+  (dt in ms; first loop of each test has no dt)
+
+whole run: pos 116.49-116.50 deg, max |vel| 0.0907 rad/s, max |iq| 0.0676 A
+
+non-loop events (every row that is not a plain exchange / read-only read)
+  T1 t=0.0053 armed+enabled                  err 0x80  watchdog 10000 us
+  T2 t=10.0082 silence start                  err -
+  T2 t=10.0209 read                           err 0x88 iq +0.0026  after 12 ms silence
+  T2 t=10.0219 read torque_enable             err 0x88  torque_enable=3 x2 (10.0219-10.0229 s)

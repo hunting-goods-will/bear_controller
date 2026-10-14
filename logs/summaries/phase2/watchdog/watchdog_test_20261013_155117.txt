@@ -1,0 +1,64 @@
+source file:      logs/phase2/watchdog/watchdog_test_20261013_155117.csv.gz
+source branch:    raw-data (git show raw-data:logs/phase2/watchdog/watchdog_test_20261013_155117.csv.gz | gunzip)
+date generated:   2026-10-13
+python env:       Python 3.13.5, pandas 3.0.6, numpy 2.5.4 (pandas is not in the project venv)
+analyzers:        none -- no offline analyzer script exists for this data type.
+                  Section 1 is the CSV's own '#' header, written by the producer
+                  at run time. Section 2 is computed from the data rows
+                  (pd.read_csv(path, comment='#')) at generation time.
+producer:         useful_tools/watchdog_bench_test.py
+                  Script as committed in 0e33864 (file mtime 15:43:08). bear_interface.py
+                  was an uncommitted version between b789949 and 0e33864 (mtime 17:27:47).
+==============================================================================
+
+--- 1. CSV header (pass/fail lines as printed by the script) ---
+
+# started 2026-10-13T15:51:02-0600
+# watchdog 10 ms (range 8-50)
+# loop 500 Hz; sched 1 prio 80 affinity [3]
+# start: pos 116.49 deg, vel 0.015, iq 0.002, winding 23.0 C, limit_i_max 5.5
+# T1: PASS -- 5000 loops, no watchdog error; max dt 3.11 ms; 0 loops with dt > 10 ms
+# T2: PASS -- bit 3 SET after 12.7 ms silence (limit 12 ms + read time); error byte 0x88; torque_enable=3 (recorded)
+# T5 (after T2): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 0.9 ms
+# T3: RECORD -- no trip in 100 ms of reads only -> reads DO keep the watchdog alive
+# T5 (after T3): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 0.8 ms
+# T4: FAIL (review) -- after trip: max |iq| 0.196 A over 17 reads (need < 0.1 A) -- check 'damping only': max |vel| 0.088 rad/s during those reads
+# T5 (after T4): FAIL -- disable() did not clear it within 500 ms; lone torque_enable = 0 cleared it after 1.0 ms
+# ABORT: a T5 check failed; remaining tests skipped (can't re-arm from an uncleared trip)
+# end: disabled, watchdog reset to 0 us
+
+--- 2. Computed from rows ---
+
+rows 5913, t 0.006-12.202 s, tests present: T1 T2 T3 T4
+
+per test: rows by action
+  T1: armed+enabled 1, exchange 5000
+  T2: silence start 1, read 1, read torque_enable 2
+  T3: armed+enabled 1, exchange 250, read 50, read torque_enable 1
+  T4: armed+enabled 1, exchange 500, silence start 1, read 17, read torque_enable 86, after disable(): still latched 1
+
+exchange loops (one bulk packet each, 500 Hz target)
+  test     n  dt med    p99  p99.9    max >2.5ms >10ms  max|iq|   iq_sent err
+  T1    5000   2.000  2.040  2.133  3.108      2     0   0.0609         0 0x80
+  T3     250   2.000  2.036  2.636  2.821      1     0   0.0560         0 0x80
+  T4     500   2.000  2.026  2.087  2.118      0     0   0.5820    -0.5,0 0x80
+  (dt in ms; first loop of each test has no dt)
+
+whole run: pos 116.27-116.50 deg, max |vel| 0.2938 rad/s, max |iq| 0.5820 A
+
+non-loop events (every row that is not a plain exchange / read-only read)
+  T1 t=0.0063 armed+enabled                  err 0x80  watchdog 10000 us
+  T2 t=10.0073 silence start                  err -
+  T2 t=10.0200 read                           err 0x88 iq +0.0115  after 12 ms silence
+  T2 t=10.0209 read torque_enable             err 0x88  torque_enable=3
+  T2 t=10.0219 read torque_enable             err 0x80  torque_enable=0
+  T3 t=10.0270 armed+enabled                  err 0x80  watchdog 10000 us
+  T3 t=10.6279 read torque_enable             err 0x80  torque_enable=0
+  T4 t=10.6329 armed+enabled                  err 0x80  watchdog 10000 us
+  T4 t=11.6330 silence start                  err -
+  T4 t=11.6458 read                           err 0x88 iq -0.1961  after silence x17 (11.6458-11.6938 s)
+  T4 t=11.6968 read torque_enable             err 0x88  torque_enable=3 x85 (11.6968-12.2008 s)
+  T4 t=12.2008 after disable(): still latched err 0x88  torque_enable=3
+  T4 t=12.2018 read torque_enable             err 0x80  torque_enable=0
+
+T4 post-trip reads: n 17, |iq| max 0.1961 A, mean 0.0366 A, last -0.0004 A; |vel| max 0.0878 rad/s; err 0x88

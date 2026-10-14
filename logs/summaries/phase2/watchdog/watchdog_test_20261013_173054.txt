@@ -1,0 +1,67 @@
+source file:      logs/phase2/watchdog/watchdog_test_20261013_173054.csv.gz
+source branch:    raw-data (git show raw-data:logs/phase2/watchdog/watchdog_test_20261013_173054.csv.gz | gunzip)
+date generated:   2026-10-13
+python env:       Python 3.13.5, pandas 3.0.6, numpy 2.5.4 (pandas is not in the project venv)
+analyzers:        none -- no offline analyzer script exists for this data type.
+                  Section 1 is the CSV's own '#' header, written by the producer
+                  at run time. Section 2 is computed from the data rows
+                  (pd.read_csv(path, comment='#')) at generation time.
+producer:         useful_tools/watchdog_bench_test.py
+                  Script and bear_interface.py both as committed in 0e33864
+                  (file mtimes 15:43:08 and 17:27:47, both before this run).
+==============================================================================
+
+--- 1. CSV header (pass/fail lines as printed by the script) ---
+
+# started 2026-10-13T17:30:38-0600
+# watchdog 10 ms (range 8-50)
+# loop 500 Hz; sched 1 prio 80 affinity [3]
+# start: pos 116.32 deg, vel -0.006, iq 0.009, winding 24.5 C, limit_i_max 5.5
+# T1: PASS -- 5000 loops, no watchdog error; max dt 3.24 ms; 0 loops with dt > 10 ms
+# T2: PASS -- bit 3 SET after 12.6 ms silence (limit 12 ms + read time); error byte 0x88; torque_enable=3 (recorded)
+# T5 (after T2): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 2.9 ms
+# T3: RECORD -- no trip in 100 ms of reads only -> reads DO keep the watchdog alive
+# T5 (after T3): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 2.8 ms
+# T4: FAIL (review) -- after trip: max |iq| 0.191 A over 17 reads (need < 0.1 A) -- check 'damping only': max |vel| 0.105 rad/s during those reads
+# T5 (after T4): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 23.9 ms
+# T5 re-arm: PASS -- re-armed and fed 0.5s with no error
+# T5: PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 3.8 ms
+# end: disabled, watchdog reset to 0 us
+
+--- 2. Computed from rows ---
+
+rows 6079, t 0.005-12.231 s, tests present: T1 T2 T3 T4 T5
+
+per test: rows by action
+  T1: armed+enabled 1, exchange 5000
+  T2: silence start 1, read 1, read torque_enable 2
+  T3: armed+enabled 1, exchange 250, read 50, read torque_enable 1
+  T4: armed+enabled 1, exchange 500, silence start 1, read 17, read torque_enable 1
+  T5: armed+enabled 1, exchange 250, read torque_enable 1
+
+exchange loops (one bulk packet each, 500 Hz target)
+  test     n  dt med    p99  p99.9    max >2.5ms >10ms  max|iq|   iq_sent err
+  T1    5000   2.000  2.041  2.095  3.238      2     0   0.0747         0 0x80
+  T3     250   2.000  2.041  2.568  2.737      1     0   0.0455         0 0x80
+  T4     500   2.000  2.063  2.091  2.092      0     0   0.5466    -0.5,0 0x80
+  T5     250   2.000  2.035  2.045  2.047      0     0   0.0464         0 0x80
+  (dt in ms; first loop of each test has no dt)
+
+whole run: pos 116.30-116.33 deg, max |vel| 0.1052 rad/s, max |iq| 0.5466 A
+
+non-loop events (every row that is not a plain exchange / read-only read)
+  T1 t=0.0047 armed+enabled                  err 0x80  watchdog 10000 us
+  T2 t=10.0058 silence start                  err -
+  T2 t=10.0184 read                           err 0x88 iq +0.0106  after 12 ms silence
+  T2 t=10.0193 read torque_enable             err 0x88  torque_enable=3
+  T2 t=10.0223 read torque_enable             err 0x80  torque_enable=0
+  T3 t=10.0273 armed+enabled                  err 0x80  watchdog 10000 us
+  T3 t=10.6302 read torque_enable             err 0x80  torque_enable=0
+  T4 t=10.6353 armed+enabled                  err 0x80  watchdog 10000 us
+  T4 t=11.6354 silence start                  err -
+  T4 t=11.6483 read                           err 0x88 iq -0.1905  after silence x17 (11.6483-11.6963 s)
+  T4 t=11.7222 read torque_enable             err 0x80  torque_enable=0
+  T5 t=11.7273 armed+enabled                  err 0x80  watchdog 10000 us
+  T5 t=12.2312 read torque_enable             err 0x80  torque_enable=0
+
+T4 post-trip reads: n 17, |iq| max 0.1905 A, mean 0.0234 A, last -0.0036 A; |vel| max 0.1052 rad/s; err 0x88
