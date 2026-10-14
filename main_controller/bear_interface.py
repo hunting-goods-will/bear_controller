@@ -124,9 +124,12 @@ class BearInterface:
             'iq': iq[0],
             'temp': temp[0]
         }
-        # The 4 registers read every loop: exactly the set Block 1 timed.
+    # Registers read every loop, in ONE bulk packet with the goal_iq write.
+    # Block 1 timed the first 4; powerstage_temperature added Oct 13 so the
+    # thermal derate can use max(winding, powerstage) like the firmware does.
     LOOP_READ_REGS = ['present_position', 'present_velocity',
-                      'present_iq', 'winding_temperature']
+                      'present_iq', 'winding_temperature',
+                      'powerstage_temperature']
     WATCHDOG_BIT = 0x08   # bit 3, "Watchdog Timeout & ESTOP" (SDK Table 3)
     ERROR_BITS = 0x7C     # bits 2-6 are errors; bits 0-1 are only warnings
 
@@ -136,15 +139,18 @@ class BearInterface:
         Returns (state, err). On a failed exchange (all retries used, ~6 ms)
         returns (None, None) -- the loop must then stop.
         Every successful call is a write, so it also keeps the watchdog fed.
+        The command is clamped to MAX_IQ (= firmware limit_i_max), so
+        firmware never silently ignores it.
         """
         iq = max(-MAX_IQ, min(MAX_IQ, iq_command))
         values, err = self.bear.bulk_read_write(
             [self.id], self.LOOP_READ_REGS, ['goal_iq'], [[iq]])[0]
         if err is None or any(v is None for v in values):
             return None, None
-        pos, vel, iq_meas, temp = values
+        pos, vel, iq_meas, temp_w, temp_p = values
         return {'position': pos, 'velocity': vel, 'iq': iq_meas,
-                'temp': temp, 'iq_sent': iq}, err
+                'temp': temp_w, 'temp_powerstage': temp_p,
+                'iq_sent': iq}, err
 
     def watchdog_tripped(self, err):
         """True if the error byte has the watchdog bit set."""
@@ -154,30 +160,42 @@ class BearInterface:
         """True for any real error (bits 2-6). Warnings don't count."""
         return err is not None and bool(err & self.ERROR_BITS)
 
-    def joint_limit_scale(self, iq_command):
-        """Zero torque at/beyond MIN_ANGLE/MAX_ANGLE. Stays enabled and
-        backdrivable rather than disabling — resumes automatically once
-        position is back in range. Separate from the stricter abort-and-
-        disable behavior the characterization sweep script needs
-        (NEXT_STEPS_v2.md §5).
+    # The two scale functions below take the state the loop ALREADY has from
+    # exchange(). They do no bus traffic and never print (both would stall a
+    # 2 ms loop). Apply both to the command before passing it to exchange().
+
+    def joint_limit_scale(self, iq_command, state):
+        """Mode 0 software angle limit. Firmware position limits do NOT apply
+        in Mode 0 (SDK 1.2.0), so this is the only thing between a command and
+        the bracket stops.
+
+        Direction-aware, like the Phase 1 run script:
+          upward (+) command: full below MODE0_MAX_ANGLE - MODE0_TAPER, tapers
+            linearly to 0 at MODE0_MAX_ANGLE, 0 at or above it;
+          downward (-) command: 0 at or below MIN_ANGLE.
+        A command pointing AWAY from a limit always passes, so the arm can be
+        driven back into range.
         """
-        position = self.get_state()['position']
-        if position <= MIN_ANGLE or position >= MAX_ANGLE:
-            print(f"WARNING: position {position:.3f} rad at/beyond joint "
-                  f"limit. Zeroing torque.")
+        pos = state['position']
+        if iq_command > 0:
+            if pos >= MODE0_MAX_ANGLE:
+                return 0.0
+            if pos > MODE0_MAX_ANGLE - MODE0_TAPER:
+                return iq_command * (MODE0_MAX_ANGLE - pos) / MODE0_TAPER
+        elif iq_command < 0 and pos <= MIN_ANGLE:
             return 0.0
         return iq_command
 
-    def thermal_scale(self, iq_command):
-        """ Reduce torque as temperature rises. Never hard-cut."""
-        temp = self.get_state()['temp']
-        if temp < TEMP_WARN:
+    def thermal_scale(self, iq_command, state):
+        """Derate on max(winding, powerstage) -- the same temperature the
+        firmware protects on. Full below TEMP_WARN, linear to 0 at TEMP_MAX,
+        0 at or above TEMP_MAX."""
+        eff = max(state['temp'], state['temp_powerstage'])
+        if eff < TEMP_WARN:
             return iq_command
-        elif temp > TEMP_MAX:
-            print(f"WARNING: Over temp ({temp:.1f}C). Zeroing torque.")
+        if eff >= TEMP_MAX:
             return 0.0
-        scale = 1.0 - (temp - TEMP_WARN) / (TEMP_MAX - TEMP_WARN)
-        return iq_command * scale
+        return iq_command * (1.0 - (eff - TEMP_WARN) / (TEMP_MAX - TEMP_WARN))
 
     def configure_watchdog(self, timeout_ms):
         """Arm the firmware watchdog for this run only. Never saved to flash."""

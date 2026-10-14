@@ -146,7 +146,7 @@ class Bench:
         if err is None or any(v is None for v in values):
             self.log(test, 'read FAILED', None, None, note=note)
             return None, None
-        pos, vel, iq, temp = values
+        pos, vel, iq, temp = values[:4]
         state = {'position': pos, 'velocity': vel, 'iq': iq, 'temp': temp}
         self.log(test, 'read', state, err, note=note)
         return state, err
@@ -324,7 +324,7 @@ def preflight(iface):
     values, err = iface.bear.bulk_read([iface.id], iface.LOOP_READ_REGS)[0]
     if err is None:
         raise SystemExit("REFUSED: could not read state.")
-    pos, vel, iq, temp = values
+    pos, vel, iq, temp = values[:4]
     if pos < MIN_POS_RAD:
         raise SystemExit(f"REFUSED: arm at {math.degrees(pos):.1f} deg. Rest it on "
                          f"the top stop (~116 deg) first.")
