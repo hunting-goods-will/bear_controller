@@ -23,6 +23,7 @@ producer:         useful_tools/watchdog_bench_test.py
 # T3: RECORD -- no trip in 100 ms of reads only -> reads DO keep the watchdog alive
 # T5 (after T3): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 2.8 ms
 # T4: FAIL (review) -- after trip: max |iq| 0.191 A over 17 reads (need < 0.1 A) -- check 'damping only': max |vel| 0.105 rad/s during those reads
+  -> Reviewed 2026-10-13: PASS by the ‘damping only’ clause pinned before review (every post-trip read with |iq| ≥ 0.1 A opposes velocity with |vel| > 0.01 rad/s). The CSV header’s ‘FAIL (review)’ is the script’s automatic < 0.1 A check only.
 # T5 (after T4): PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 23.9 ms
 # T5 re-arm: PASS -- re-armed and fed 0.5s with no error
 # T5: PASS -- disable() cleared it; torque_enable 0 and error 0x80 after 3.8 ms
