@@ -175,6 +175,29 @@ In both runs, single-transaction median + gap ≈ 1 ms, and get_state's median
 here reflect the phase within that cycle, not the actuator's turnaround. No
 SCHED_OTHER (plain) run yet.
 
+### `phase2/watchdog/` — Mode 0 watchdog bench test (T1–T5)
+Producer: `useful_tools/watchdog_bench_test.py` (committed on `main` in
+`0e33864`). **Enables torque (Mode 0).** Bare rig, arm resting on the top
+stop, watchdog 10 ms, 500 Hz loop with one bulk `exchange()` per loop. Tests:
+T1 feed `goal_iq = 0` for 10 s; T2 total silence → trip with bit 3 within
+12 ms; T3 reads only, no writes → RECORD whether it trips; T4 command −0.5 A
+then silence → after the trip \|iq\| < 0.1 A; T5 `disable()` clears the trip
+and re-arms. Pass/fail lines are in the `#` header; rows are
+`test, t_s, dt_ms, action, pos_rad, vel_rad_s, iq_A, iq_sent_A, err, note`;
+read with `pd.read_csv(path, comment='#')`. Dated 2026-10-13.
+
+Provenance: the script file was last edited at 15:43:08, so runs 2–4 used
+the committed `0e33864` version. Run 1 used an earlier, uncommitted version.
+`bear_interface.py` was last edited at 17:27:47, so only run 4 used the
+committed `0e33864` version.
+
+| File | Notes |
+|---|---|
+| `watchdog_test_20261013_153347.csv.gz` | Run 1, SCHED_OTHER, no pinning. T1 PASS (max dt 5.65 ms), T2 PASS (bit 3 after 12.8 ms). T5 **FAIL**: read once ~1 ms after `disable()`, still torque_enable 3 / 0x88. The T5 procedure was then changed to poll every 5 ms for up to 500 ms. T3/T4 not run. |
+| `watchdog_test_20261013_154341.csv.gz` | Run 2, SCHED_FIFO 80, CPU 3. T1 PASS (max dt 3.14 ms), T2 PASS (12.6 ms), T5 PASS (0.9 ms). T3 RECORD: reads alone **do** keep the watchdog alive (no trip in 100 ms). T5 PASS (0.8 ms). Then **ABORT** at T4: enable failed (torque_enable read 0). |
+| `watchdog_test_20261013_155117.csv.gz` | Run 3, FIFO 80, CPU 3. T1/T2/T3/T5 as run 2. T4 **FAIL (review)**: max \|iq\| 0.196 A over 17 post-trip reads (max \|vel\| 0.088 rad/s). T5 after T4 **FAIL**: `disable()` did not clear within 500 ms; a lone `torque_enable = 0` cleared it in 1.0 ms. Aborted, re-arm not tested. |
+| `watchdog_test_20261013_173054.csv.gz` | Run 4, FIFO 80, CPU 3, committed `bear_interface.py`. T1 PASS (max dt 3.24 ms), T2 PASS (12.6 ms), T3 RECORD as before, T5 PASS (2.9 / 2.8 ms). T4 **FAIL (review)**: max \|iq\| 0.191 A over 17 reads (max \|vel\| 0.105 rad/s). T5 after T4 PASS (23.9 ms), re-arm PASS, final T5 PASS (3.8 ms). Only run to reach the end. |
+
 ### Other
 
 | File | Notes |
