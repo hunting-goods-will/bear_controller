@@ -5,6 +5,13 @@ import time
 
 
 class BearInterface:
+    # enable_position_mode(): how long to wait for the goal_position read-back
+    # to reach the new goal. The read-back is the firmware's motion-profiled
+    # setpoint (Oct 14 probe), which ramps at limit_acc_max (5 rad/s^2) and
+    # limit_velocity_max (1 rad/s): the longest in-range move (0 -> 118 deg,
+    # 2.06 rad) takes ~2.3 s. 3 s covers every in-range case.
+    GOAL_SETTLE_S = 3.0
+
     def __init__(self):
         self.bear = Manager.BEAR(port=PORT, baudrate=BAUDRATE)
         self.id = ACTUATOR_ID
@@ -94,11 +101,24 @@ class BearInterface:
 
         # Goal = where the arm is, and confirm it (a lost or ignored write would
         # leave an old goal, and enabling would drive to it).
+        # The read-back is NOT the raw register: it is the firmware's
+        # motion-profiled setpoint, which ramps from its old value to the new
+        # goal at limit_acc_max even while disabled (Oct 14 probe: a 0.005 rad
+        # change showed after 58.9 ms in 15/15 trials; a 0.0325 rad change was
+        # 0.0232 rad along after 100 ms, as a 5 rad/s^2 profile predicts).
+        # Enabling before it arrives would make the arm chase a moving
+        # setpoint, so poll until it equals the goal, up to GOAL_SETTLE_S.
         self.bear.set_goal_position((self.id, initial_position))
-        (goal,), _ = self.bear.get_goal_position(self.id)[0]
-        if goal is None or abs(goal - initial_position) > 1e-4:
-            raise RuntimeError(f"enable refused: goal_position reads {goal}, "
-                               f"wrote {initial_position:.5f} rad")
+        t0 = time.monotonic()
+        while True:
+            (goal,), _ = self.bear.get_goal_position(self.id)[0]
+            if goal is not None and abs(goal - initial_position) <= 1e-4:
+                break
+            if time.monotonic() - t0 > self.GOAL_SETTLE_S:
+                raise RuntimeError(f"enable refused: goal_position reads {goal}, "
+                                   f"wrote {initial_position:.5f} rad, not settled "
+                                   f"after {self.GOAL_SETTLE_S:.1f} s")
+        goal_ms = (time.monotonic() - t0) * 1000
 
         # The arm must still be there, or enabling would lurch to the goal.
         (pos,), _ = self.bear.get_present_position(self.id)[0]
@@ -121,7 +141,8 @@ class BearInterface:
         ms = (time.monotonic() - t0) * 1000
 
         print(f"Actuator enabled in Position Mode (goal {math.degrees(goal):.2f} "
-              f"deg; confirmed on read {reads}, {ms:.1f} ms).")
+              f"deg, settled in {goal_ms:.0f} ms; enable confirmed on read {reads}, "
+              f"{ms:.1f} ms).")
         return reads, ms
 
     def disable(self):

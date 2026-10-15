@@ -57,6 +57,10 @@ FRICTION = 0.85
 TOP_STOP = math.radians(116.5)
 BOTTOM_STOP = 0.0
 POS_KP = 12.0           # 1/s, Position Mode velocity command per rad of error
+ACC_MAX = 5.0           # rad/s^2, firmware setpoint profile (limit_acc_max).
+                        # Oct 14 probe: the goal_position read-back is a profiled
+                        # setpoint that ramps to the written goal even while
+                        # disabled; Position Mode tracks that setpoint.
 VEL_TAU = 0.03          # s, velocity response
 
 
@@ -102,6 +106,7 @@ class FakeBear:
         self.pos = math.radians(start_deg)
         self.top = max(TOP_STOP, self.pos)   # a start above the stop rests there
         self.vel = 0.0
+        self.sp, self.sp_v = 0.0, 0.0   # profiled setpoint (register starts at 0)
         self.iq = 0.0
         self.te = 0
         self.te_visible = 0
@@ -123,12 +128,33 @@ class FakeBear:
         self.err_override = None  # fn() -> int or None (reads only)
 
     # -- physics -------------------------------------------------------------
+    def _update_sp(self, h):
+        """Move the setpoint toward goal_position: accelerate at ACC_MAX up to
+        limit_velocity_max, brake in time to stop on the goal."""
+        g, v = self.regs['goal_position'], self.sp_v
+        e = g - self.sp
+        if abs(e) < 1e-9 and abs(v) < 1e-6:
+            self.sp, self.sp_v = g, 0.0
+            return
+        d = 1.0 if e > 0 else -1.0
+        if v * d > 0 and v * v / (2 * ACC_MAX) >= abs(e):
+            v -= d * ACC_MAX * h
+        else:
+            v += d * ACC_MAX * h
+        vmax = self.regs['limit_velocity_max']
+        v = max(-vmax, min(vmax, v))
+        new = self.sp + v * h
+        if (g - new) * d <= 0:
+            new, v = g, 0.0
+        self.sp, self.sp_v = new, v
+
     def step(self, h):
+        self._update_sp(h)
         if self.te_change_at is not None and self.clock.t >= self.te_change_at:
             self.te_visible, self.te_change_at = self.te, None
         if self.te == 1 and self.regs['mode'] == 2:
             vmax = self.regs['limit_velocity_max']
-            v_cmd = max(-vmax, min(vmax, POS_KP * (self.regs['goal_position'] - self.pos)))
+            v_cmd = max(-vmax, min(vmax, POS_KP * (self.sp - self.pos)))
             self.vel += (v_cmd - self.vel) * min(1.0, h / VEL_TAU)
             sgn = (self.vel > 0) - (self.vel < 0)
             self.iq = (gravity_nm(self.pos) - spring_nm(self.pos) + FRICTION * sgn) / KT
@@ -154,6 +180,8 @@ class FakeBear:
             return self.te_visible
         if name == 'present_position':
             return self.pos
+        if name == 'goal_position':
+            return self.sp
         if name == 'present_velocity':
             return self.vel
         if name == 'present_iq':
