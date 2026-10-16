@@ -29,6 +29,7 @@ import csv
 import io
 import math
 import os
+import random
 import shutil
 import tempfile
 import time
@@ -57,6 +58,8 @@ FRICTION = 0.85
 TOP_STOP = math.radians(116.5)
 BOTTOM_STOP = 0.0
 POS_KP = 12.0           # 1/s, Position Mode velocity command per rad of error
+VEL_NOISE = 0.026       # rad/s SD on present_velocity reads (Sep 30 hold data)
+POS_NOISE = math.radians(0.004)   # rad SD on present_position reads (same)
 ACC_MAX = 5.0           # rad/s^2, firmware setpoint profile (limit_acc_max).
                         # Oct 14 probe: the goal_position read-back is a profiled
                         # setpoint that ramps to the written goal even while
@@ -107,6 +110,7 @@ class FakeBear:
         self.top = max(TOP_STOP, self.pos)   # a start above the stop rests there
         self.vel = 0.0
         self.sp, self.sp_v = 0.0, 0.0   # profiled setpoint (register starts at 0)
+        self.rng = random.Random(14)    # sensor noise, seeded for repeatability
         self.iq = 0.0
         self.te = 0
         self.te_visible = 0
@@ -179,11 +183,11 @@ class FakeBear:
         if name == 'torque_enable':
             return self.te_visible
         if name == 'present_position':
-            return self.pos
+            return self.pos + self.rng.gauss(0.0, POS_NOISE)
         if name == 'goal_position':
             return self.sp
         if name == 'present_velocity':
-            return self.vel
+            return self.vel + self.rng.gauss(0.0, VEL_NOISE)
         if name == 'present_iq':
             o = self.iq_override() if self.iq_override else None
             return self.iq if o is None else o

@@ -9,9 +9,11 @@ Run from the repo root:
 
 Synthetic physics (released arm, + = up):
     J*acc = y(theta) - f(theta, v),   y = TAU_SPRING_TABLE - RIG_MGL*sin(vest)
+                                          + an optional offset (a stale table)
     SIM ONLY: above the table end the last spring value is held so the arm can
     reach the 116.5 deg stop. Noise: vel 0.02 rad/s, pos 2e-4 rad, iq 0.037 A
-    (STATE 4.2), loop jitter, occasional 3.5 ms overrun.
+    (STATE 4.2), loop jitter, 3.5 ms overruns on 0.2 % of loops (Oct 13 RT runs:
+    a few loops > 3 ms per 5,000).
 """
 import argparse
 import math
@@ -40,9 +42,21 @@ F718 = np.array([(81.8, .777), (87.1, .890), (92.1, .925), (97.0, .934),
                  (162.0, .815), (167.0, .830), (172.0, .806), (176.6, .780)])
 
 
+# The rig's TRUE spring-minus-gravity may differ from the table (as on Oct 15):
+# SPRING_OFFSET(act_deg) -> N m added to the table value, set per scenario.
+SPRING_OFFSET = [lambda act_deg: 0.0]
+
+
 def y_true(act):
     v = math.degrees(act) + PHI_DEG
-    return float(np.interp(v, T[:, 0], T[:, 1])) - RIG_MGL * math.sin(math.radians(v))
+    return (float(np.interp(v, T[:, 0], T[:, 1])) - RIG_MGL * math.sin(math.radians(v))
+            + SPRING_OFFSET[0](math.degrees(act)))
+
+
+def oct15_offset(act_deg):
+    """Shape of the Oct 15 sweep-minus-table gap: +0.04 at 33 deg rising to
+    +0.27 at 98 deg (held beyond)."""
+    return 0.04 + 0.23 * min(1.0, max(0.0, (act_deg - 33.0) / 65.0))
 
 
 def fric_true(act, shift=0.0):
@@ -109,7 +123,7 @@ def free_phase(h_deg, J, rng, shift=0.0, speed_coef=0.0, iq_bias=0.0, stuck=Fals
     next_sample = 0.0
     while sim_t < 1.2:
         if sim_t >= next_sample:
-            step = 0.0035 if rng.random() < 0.01 else 0.002 + rng.normal(0, 5e-5)
+            step = 0.0035 if rng.random() < 0.002 else 0.002 + rng.normal(0, 5e-5)
             next_sample = sim_t + step
             out.append((sim_t, th + rng.normal(0, 2e-4), w + rng.normal(0, 0.02),
                         iq_bias + rng.normal(0, 0.037)))
@@ -185,13 +199,19 @@ def check(name, cond, detail=''):
         BAD.append(name)
 
 
-def fit(sweep, rels):
-    fric = F.sweep_tables(sweep)
+def fit(sweep, rels, after=None, y_source='sweep'):
+    b = F.sweep_tables(sweep)
+    if after:
+        fric, st = F.merge_sweeps(b, F.sweep_tables(after))
+        stable = st['rms_dy'] <= F.STABLE_DY and st['rms_df'] <= F.STABLE_DF
+        why = f"rig changed: RMS dy {st['rms_dy']:.3f}, RMS df {st['rms_df']:.3f}"
+    else:
+        fric, stable, why = b, False, "no after-sweep"
     releases = []
     for p in rels:
         releases.extend(F.parse_release_file(p)[1])
-    per, ph = F.analyse(releases, fric)
-    return per, ph, F.verdict(ph)
+    per, ph = F.analyse(releases, fric, y_source=y_source)
+    return per, ph, F.verdict(ph, stable, why)
 
 
 def standard_set(d, J, rng, prefix='r', **kw):
@@ -211,25 +231,27 @@ def main():
     d = tempfile.mkdtemp(prefix='fit_j_test_')
     try:
         sweep = os.path.join(d, 'sweep.csv')
+        after = os.path.join(d, 'sweep_after.csv')
         write_sweep(sweep, rng)
+        write_sweep(after, rng)
 
-        print("\n=== 0. friction recovered from a synthetic sweep ===")
+        print("\n=== 0. friction and y recovered from a synthetic sweep ===")
         fr = F.sweep_tables(sweep)
         true = np.array([fric_true(math.radians(v - PHI_DEG)) for v in fr[:, 0]])
         err = np.abs(fr[:, 1] - true)
         check("friction per bin within 0.01 Nm of truth", err.max() < 0.01,
               f"max {err.max():.4f} Nm over {len(fr)} bins, act "
               f"{fr[0, 0] - PHI_DEG:.1f}-{fr[-1, 0] - PHI_DEG:.1f} deg")
-        yerr = np.abs(fr[:, 2] - F.y_table(fr[:, 0]))
-        check("y_sweep matches the table within 0.01 Nm", np.nanmax(yerr) < 0.01,
-              f"max {np.nanmax(yerr):.4f}")
+        ytrue = np.array([y_true(math.radians(v - PHI_DEG)) for v in fr[:, 0]])
+        yerr = np.abs(fr[:, 2] - ytrue)
+        check("y_sweep within 0.01 Nm of truth", yerr.max() < 0.01, f"max {yerr.max():.4f}")
         check("coverage reaches act >= 95 deg with --soft-start-s 0.3",
               fr[-1, 0] - PHI_DEG >= 95, f"top bin mean act {fr[-1, 0] - PHI_DEG:.1f}")
 
         for J in (0.015, 0.006, 0.005, 0.020):
-            print(f"\n=== 1. true J = {J}, same friction in sweep and releases ===")
+            print(f"\n=== 1. true J = {J}; table correct; before + after sweeps ===")
             rels = standard_set(d, J, rng)
-            per, ph, (lab, mean, dev, det) = fit(sweep, rels)
+            per, ph, (lab, mean, dev, det) = fit(sweep, rels, after)
             for h, v in ph.items():
                 print(f"      {h:g} deg: J_h {v['J']:.4f} ({v['n_use']}/{v['n_all']}), "
                       f"rms {v['rms']:.3f}")
@@ -238,29 +260,65 @@ def main():
                   f"{mean:.4f} vs {J}")
             ns = [p['n'] for p in per]
             check("window samples per release >= 8", min(ns) >= 8, f"{min(ns)}-{max(ns)}")
+            vmax = max(p['w']['vest'].max() for p in per if p['n'])
+            check("no sample outside the sweep coverage", vmax <= fr[-1, 0] + 1e-6,
+                  f"max vest {vmax:.1f} vs coverage {fr[-1, 0]:.1f}")
 
-        print("\n=== 2. release friction 0.05 Nm below the sweep's (limitation) ===")
-        rels = standard_set(d, 0.015, rng, shift=-0.05)
+        print("\n=== 2. table STALE like Oct 15 (true spring +0.04 -> +0.27 N m) ===")
+        SPRING_OFFSET[0] = oct15_offset
+        s15, a15 = os.path.join(d, 's15.csv'), os.path.join(d, 'a15.csv')
+        write_sweep(s15, rng)
+        write_sweep(a15, rng)
+        rels = standard_set(d, 0.015, rng, prefix='st')
+        per, ph, (lab, mean, dev, det) = fit(s15, rels, a15)
+        print("      sweep y: " + ', '.join(f"{h:g}: {v['J']:.4f}" for h, v in ph.items())
+              + f" -> {lab}, mean {mean:.4f}")
+        check("y from the sweeps: PASS and within 5 % of truth",
+              lab == 'PASS' and abs(mean / 0.015 - 1) < 0.05, det)
+        _, ph_t, (lab_t, mean_t, dev_t, _) = fit(s15, rels, a15, y_source='table')
+        print("      table y: " + ', '.join(f"{h:g}: {v['J']:.4f}" for h, v in ph_t.items())
+              + f" -> {lab_t}, mean {mean_t:.4f}, max dev {dev_t * 100:.0f} %")
+        check("y from the stale table is badly biased (what Oct 14's pin would have done)",
+              abs(mean_t / 0.015 - 1) > 0.25 or lab_t != 'PASS')
+
+        print("\n=== 3. rig changes during the session (after-sweep spring +0.15 N m) ===")
+        SPRING_OFFSET[0] = lambda act_deg: 0.0
+        s3, a3 = os.path.join(d, 's3.csv'), os.path.join(d, 'a3.csv')
+        write_sweep(s3, rng)
+        SPRING_OFFSET[0] = lambda act_deg: 0.15
+        write_sweep(a3, rng)
+        SPRING_OFFSET[0] = lambda act_deg: 0.0
+        rels = standard_set(d, 0.015, rng, prefix='rc')
+        per, ph, (lab, mean, dev, det) = fit(s3, rels, a3)
+        check("INCOMPLETE (rig changed)", lab == 'INCOMPLETE' and 'changed' in det, det)
+
+        print("\n=== 4. no after-sweep ===")
+        rels = standard_set(d, 0.015, rng, prefix='na')
         per, ph, (lab, mean, dev, det) = fit(sweep, rels)
+        check("INCOMPLETE (no after-sweep)", lab == 'INCOMPLETE' and 'after' in det, det)
+
+        print("\n=== 5. release friction 0.05 Nm below the sweeps' (limitation) ===")
+        rels = standard_set(d, 0.015, rng, prefix='fl', shift=-0.05)
+        per, ph, (lab, mean, dev, det) = fit(sweep, rels, after)
         print("      " + ', '.join(f"{h:g}: {v['J']:.4f}" for h, v in ph.items())
               + f" -> {lab}, mean {mean:.4f}")
         check("biased LOW, as expected (fit subtracts too much friction)", mean < 0.015)
 
-        print("\n=== 3. friction falls with speed (0.03 Nm per rad/s; limitation) ===")
-        rels = standard_set(d, 0.015, rng, speed_coef=-0.03)
-        per, ph, (lab, mean, dev, det) = fit(sweep, rels)
+        print("\n=== 6. friction falls with speed (0.03 Nm per rad/s; limitation) ===")
+        rels = standard_set(d, 0.015, rng, prefix='sp', speed_coef=-0.03)
+        per, ph, (lab, mean, dev, det) = fit(sweep, rels, after)
         print("      " + ', '.join(f"{h:g}: {v['J']:.4f}" for h, v in ph.items())
               + f" -> {lab}, mean {mean:.4f}")
         check("biased LOW", mean < 0.015)
 
-        print("\n=== 4. exclusions: stuck, NOT COMPLETED, iq bias, free-phase error ===")
+        print("\n=== 7. exclusions: stuck, NOT COMPLETED, iq bias, free-phase error ===")
         p1 = os.path.join(d, 'j_release_x0.csv')
         write_releases(p1, (90, 75, 60), 2, 0.015, rng,
                        special={2: 'stuck', 3: 'iq', 4: 'drop'})
         p2 = os.path.join(d, 'j_release_x1.csv')
         write_releases(p2, (90, 75, 60), 2, 0.015, rng,
                        special={6: 'notdone'})
-        per, ph, (lab, mean, dev, det) = fit(sweep, [p1, p2])
+        per, ph, (lab, mean, dev, det) = fit(sweep, [p1, p2], after)
         why = {(p['rel']['file'], p['rel']['idx']): p['why'] for p in per}
         check("stuck excluded", 'stuck' in why[('j_release_x0.csv', 2)], why[('j_release_x0.csv', 2)])
         check("iq bias excluded", 'mean iq' in why[('j_release_x0.csv', 3)], why[('j_release_x0.csv', 3)])
@@ -270,17 +328,19 @@ def main():
               why[('j_release_x1.csv', 6)])
         check("INCOMPLETE when a height has < 3 usable", lab == 'INCOMPLETE', det)
 
-        print("\n=== 5. CLI end to end, summary + plot ===")
-        rels = standard_set(d, 0.015, rng)
+        print("\n=== 8. CLI end to end, summary + plot ===")
+        rels = standard_set(d, 0.015, rng, prefix='cli')
         out = os.path.join(d, 'summary.txt')
         png = os.path.join(d, 'fit.png')
-        rc = F.main(['--sweep', sweep, *rels, '--out', out, '--plot', png])
+        rc = F.main(['--sweep', sweep, '--sweep-after', after, *rels, '--out', out,
+                     '--plot', png])
         check("rc 0 and summary written", rc == 0 and os.path.getsize(out) > 0)
         txt = open(out).read()
-        check("summary has verdict and cross-checks",
-              'VERDICT (STATE 5): PASS' in txt and 'Method B' in txt and 'friction +0.05' in txt)
+        check("summary has verdict, stability and cross-checks",
+              'VERDICT (STATE 5): PASS' in txt and 'STABLE' in txt and 'Method B' in txt
+              and 'friction +0.05' in txt and 'TAU_SPRING_TABLE' in txt)
 
-        print("\n=== 6. a non-bare sweep is refused ===")
+        print("\n=== 9. a non-bare sweep is refused ===")
         bad = os.path.join(d, 'sweep_wrench.csv')
         write_sweep(bad, rng, mass=0.711)
         try:
@@ -290,7 +350,7 @@ def main():
             check("refused", 'bare' in str(e), str(e))
 
         if a.real_sweep:
-            print(f"\n=== 7. real sweep: {a.real_sweep} ===")
+            print(f"\n=== 10. real sweep: {a.real_sweep} ===")
             fr = F.sweep_tables(a.real_sweep)
             yt = F.y_table(fr[:, 0])
             for r, y in zip(fr, yt):

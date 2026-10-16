@@ -13,12 +13,17 @@ inertia J offline.
   1. enable_position_mode() at the present position (confirmed enable).
   2. approach: ramp goal_position to the target at --approach-velocity, soft
      start/stop SOFT_START_S (observer_excitation.py's run_leg ramp).
-  3. hold: until |vel| < SETTLE_VEL for SETTLE_S continuously, after at least
-     MIN_HOLD_S. Not settled within MAX_HOLD_S -> abort.
+  3. hold: until the position has moved less than SETTLE_SPAN_DEG over the
+     last SETTLE_S, after at least MIN_HOLD_S. Not settled within MAX_HOLD_S ->
+     abort. (Position, not the velocity register: at a Position-Mode hold the
+     register jitters with SD ~0.026 rad/s while the position is still to
+     ~0.004 deg -- Sep 30 dwell. The Oct 14 shakedown never "settled" on the
+     old |vel| < 0.02 rule.)
   4. release: iface.disable() (confirmed by read-back, up to 3 attempts).
      Not confirmed -> abort.
   5. free: reads only (no writes of any kind) until pos >= FREE_REST_DEG and
-     |vel| < SETTLE_VEL for SETTLE_S, or FREE_MAX_S after the release command.
+     the position has moved less than SETTLE_SPAN_DEG over SETTLE_S, or
+     FREE_MAX_S after the release command.
      Moved < STUCK_DEG in the first STUCK_WINDOW_S -> marked "stuck", and the
      run continues from wherever the arm is.
 
@@ -85,8 +90,8 @@ RAMP_FLOOR = 0.15            # minimum ramp; without it the step decays to zero
 ARRIVE_EPS = math.radians(0.5)
 
 # ---- Hold / free phase rules -------------------------------------------------
-SETTLE_VEL = 0.02            # rad/s, "still"
-SETTLE_S = 0.3               # s still, continuously
+SETTLE_SPAN_DEG = 0.1        # "still" = position moved less than this...
+SETTLE_S = 0.3               # ...over the last SETTLE_S (mean |v| < 0.006 rad/s)
 MIN_HOLD_S = 0.5
 MAX_HOLD_S = 3.0             # not settled by then -> abort
 HOLD_IQ_WINDOW_S = 0.2       # footer: mean iq over the last 0.2 s of hold
@@ -122,6 +127,12 @@ POS_P, POS_I, POS_D = 5.0, 0.0, 0.2
 LIMIT_I_MAX = 5.5
 LIMIT_VELOCITY_MAX = 1.0
 LIMIT_ACC_MAX = 5.0
+# Firmware position limit for THIS script only (Oct 15). With 118 deg (config
+# MAX_ANGLE) the arm's impact on the top stop overshot to 120.18 deg and tripped
+# the Joint Limit error (0x90) in the free phase, after the fit window. 125 deg
+# (2.1817 rad, the value already in flash) clears the overshoot. Goals are still
+# clamped in software to MIN_ANGLE..MAX_ANGLE, and the start must rest <= 118.
+FW_LIMIT_POSITION_MAX = math.radians(125.0)
 # Written in this order while disabled, then every one read back and compared
 # before any enable. No save_config.
 SETTINGS = [
@@ -134,7 +145,7 @@ SETTINGS = [
     ('limit_velocity_max', LIMIT_VELOCITY_MAX),
     ('limit_acc_max', LIMIT_ACC_MAX),
     ('limit_position_min', MIN_ANGLE),
-    ('limit_position_max', MAX_ANGLE),
+    ('limit_position_max', FW_LIMIT_POSITION_MAX),
 ]
 READBACK_RTOL, READBACK_ATOL = 1e-4, 1e-6   # float32 registers
 
@@ -362,26 +373,39 @@ class Run:
             if arrived:
                 return
 
+    @staticmethod
+    def span_over(samples, now, window):
+        """Position span (rad) over the last `window` s of (t, pos, ...) samples,
+        or None if the samples don't cover the whole window yet."""
+        lo = hi = None
+        covered = False
+        for smp in reversed(samples):
+            if smp[0] < now - window:
+                covered = True
+                break
+            p = smp[1]
+            lo = p if lo is None or p < lo else lo
+            hi = p if hi is None or p > hi else hi
+        return (hi - lo) if covered and lo is not None else None
+
     def hold(self, target):
         """Hold the target until settled. Returns (hold position, mean iq over
         the last HOLD_IQ_WINDOW_S)."""
         t0 = time.monotonic()
-        still_since = None
         samples = []                     # (t, pos, iq)
+        span = None
         while True:
             s, now = self.enabled_cycle('hold', target)
             samples.append((now, s['pos'], s['iq']))
-            if abs(s['vel']) < SETTLE_VEL:
-                if still_since is None:
-                    still_since = now
-            else:
-                still_since = None
-            if (now - t0 >= MIN_HOLD_S and still_since is not None
-                    and now - still_since >= SETTLE_S):
+            span = self.span_over(samples, now, SETTLE_S)
+            if (now - t0 >= MIN_HOLD_S and span is not None
+                    and span < math.radians(SETTLE_SPAN_DEG)):
                 break
             if now - t0 > MAX_HOLD_S:
+                moved = 'n/a' if span is None else f"{math.degrees(span):.3f} deg"
                 raise Abort(f"hold at {math.degrees(target):.1f} deg not settled "
-                            f"within {MAX_HOLD_S:.1f} s (|vel| {abs(s['vel']):.3f})")
+                            f"within {MAX_HOLD_S:.1f} s (moved {moved} in the last "
+                            f"{SETTLE_S} s)")
         t_end = samples[-1][0]
         last_iq = [iq for t, _, iq in samples if t >= t_end - HOLD_IQ_WINDOW_S]
         return samples[-1][1], sum(last_iq) / len(last_iq)
@@ -406,9 +430,10 @@ class Run:
     def free(self, t_cmd, pos_release):
         """Reads only. Returns (peak |vel|, time to rest or None, stuck,
         drop_error or None)."""
-        peak, rest_t, still_since, moved = 0.0, None, None, 0.0
+        peak, rest_t, moved = 0.0, None, 0.0
         stuck = None
         drop_error = None
+        hist = []                        # (t, pos) of good samples
         while True:
             s, err, now, _ = self.cycle('free', None)
             elapsed = now - t_cmd
@@ -420,14 +445,11 @@ class Run:
                 peak = max(peak, abs(s['vel']))
                 if elapsed <= STUCK_WINDOW_S:
                     moved = max(moved, abs(s['pos'] - pos_release))
-                if (s['pos'] >= math.radians(FREE_REST_DEG)
-                        and abs(s['vel']) < SETTLE_VEL):
-                    if still_since is None:
-                        still_since = now
-                    if now - still_since >= SETTLE_S:
-                        rest_t = still_since - t_cmd
-                else:
-                    still_since = None
+                hist.append((now, s['pos']))
+                if s['pos'] >= math.radians(FREE_REST_DEG):
+                    span = self.span_over(hist, now, SETTLE_S)
+                    if span is not None and span < math.radians(SETTLE_SPAN_DEG):
+                        rest_t = (now - SETTLE_S) - t_cmd
             if stuck is None and elapsed > STUCK_WINDOW_S:
                 stuck = moved < math.radians(STUCK_DEG)
             if rest_t is not None or elapsed >= FREE_MAX_S:
@@ -547,10 +569,10 @@ def preflight(iface, run):
         f"planned_s={a.planned_s:.1f} (worst case: approach from {REST_MAX_DEG:.0f} "
         f"deg, {MAX_HOLD_S} s hold, {FREE_MAX_S} s free per release) "
         f"run_cap_s={RUN_CAP_S}",
-        f"settle: |vel| < {SETTLE_VEL} rad/s for {SETTLE_S} s continuously, min "
-        f"hold {MIN_HOLD_S} s, abort if not settled in {MAX_HOLD_S} s",
-        f"free: reads only until pos >= {FREE_REST_DEG} deg and |vel| < "
-        f"{SETTLE_VEL} for {SETTLE_S} s, or {FREE_MAX_S} s after the release "
+        f"settle: position moved < {SETTLE_SPAN_DEG} deg over the last {SETTLE_S} s, "
+        f"min hold {MIN_HOLD_S} s, abort if not settled in {MAX_HOLD_S} s",
+        f"free: reads only until pos >= {FREE_REST_DEG} deg and moved < "
+        f"{SETTLE_SPAN_DEG} deg over {SETTLE_S} s, or {FREE_MAX_S} s after the release "
         f"command; stuck = moved < {STUCK_DEG} deg in the first {STUCK_WINDOW_S} s",
         f"aborts: err != 0x80; |iq| > {IQ_TRIP_A} A once or > {IQ_ABORT_A} A x"
         f"{IQ_ABORT_COUNT}; |goal-pos| > {TRACKING_ABORT_DEG} deg; temp >= "
