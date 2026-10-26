@@ -1,0 +1,64 @@
+==============================================================================
+  J RELEASE FIT -- Method C (pinned 2026-10-14; y from the sweeps, 2026-10-15)
+==============================================================================
+sweep before: logs/phase2/observer_csvs/observer_sweep_bare_20261015_202707.csv
+sweep after:  logs/phase2/observer_csvs/observer_sweep_bare_20261015_205603.csv
+releases:     logs/phase2/j_release/j_release_20261015_202949.csv
+releases:     logs/phase2/j_release/j_release_20261015_204934.csv
+releases:     logs/phase2/j_release/j_release_20261015_205429.csv
+KT 0.67 Nm/A (datasheet); y and f are both KT*iq (KT units)
+
+Same-session sweeps (y = -(up + down)/2, f = (up - down)/2 of KT*iq):
+     act   f_avg      df   y_avg      dy  y_table  avg-tab
+    33.2   0.915  +0.022   1.890  -0.004    1.831   +0.059
+    38.1   0.946  -0.003   1.749  +0.013    1.763   -0.013
+    43.0   0.922  -0.001   1.656  +0.012    1.683   -0.027
+    48.0   0.903  -0.006   1.588  +0.030    1.625   -0.036
+    53.0   0.931  -0.025   1.536  +0.017    1.590   -0.054
+    58.0   0.949  -0.017   1.472  +0.029    1.504   -0.031
+    63.0   0.861  -0.029   1.274  +0.025    1.360   -0.086
+    68.0   0.863  -0.049   1.185  +0.008    1.254   -0.069
+    73.0   0.843  -0.063   1.110  +0.007    1.163   -0.053
+    78.0   0.797  -0.060   1.011  +0.015    1.096   -0.084
+    83.0   0.803  -0.070   0.966  +0.015    1.067   -0.101
+    88.0   0.814  -0.083   0.952  +0.002    1.043   -0.091
+    93.0   0.826  -0.086   0.937  +0.017    1.045   -0.108
+    97.6   0.806  -0.087   0.935  +0.010    1.046   -0.111
+  stability (after - before): RMS dy 0.017 (max 0.030), RMS df 0.053 (max 0.087) N m over 14 bins -> STABLE (limits 0.06 / 0.1)
+  coverage act 33.2-97.6 deg (samples outside are excluded)
+
+Per release (Method C):
+  file                          # target    n    acc range        J    rms  mean iq v_reg-v_pos  use
+  j_release_20261015_202949.csv  1     90   27  -24.9-119.4   0.0007  0.116   -0.000       0.034  yes
+  j_release_20261015_202949.csv  2     75    8   26.5-133.8   0.0025  0.088   +0.000       0.052  yes
+  j_release_20261015_202949.csv  3     60    4   95.8-153.5   0.0035  0.069   -0.002       0.037  NO (4 < 8 samples)
+  j_release_20261015_204934.csv  1     90   26  -20.9-117.7   0.0010  0.111   +0.001       0.035  yes
+  j_release_20261015_204934.csv  2     75   51  -28.4-133.4   0.0020  0.155   +0.000       0.042  yes
+  j_release_20261015_204934.csv  3     60    5   77.1-152.9   0.0037  0.091   +0.001       0.054  NO (5 < 8 samples)
+  j_release_20261015_204934.csv  4     90   28  -20.1-108.7   0.0012  0.110   +0.001       0.038  yes
+  j_release_20261015_204934.csv  5     75   49  -27.6-126.5   0.0023  0.154   -0.001       0.034  yes
+  j_release_20261015_204934.csv  6     60    5   73.8-150.8   0.0038  0.094   +0.001       0.041  NO (5 < 8 samples)
+  j_release_20261015_205429.csv  1     90   27  -17.9-108.8   0.0012  0.109   +0.001       0.025  yes
+  j_release_20261015_205429.csv  2     75   56  -25.1-116.0   0.0025  0.150   -0.001       0.038  yes
+  j_release_20261015_205429.csv  3     60    5   74.2-151.1   0.0037  0.094   +0.001       0.042  NO (5 < 8 samples)
+  j_release_20261015_205429.csv  4     90   28  -23.1-105.4   0.0012  0.111   -0.000       0.030  yes
+  j_release_20261015_205429.csv  5     75   57  -28.7-114.5   0.0025  0.151   +0.000       0.035  yes
+  j_release_20261015_205429.csv  6     60    4   80.8-135.8   0.0039  0.075   -0.000       0.064  NO (4 < 8 samples)
+
+Per height (median of usable releases):
+     60 deg: J_h nan  residual RMS nan Nm  (0/5 usable: )
+     75 deg: J_h 0.0025  residual RMS 0.151 Nm  (5/5 usable: 0.0025, 0.0020, 0.0023, 0.0025, 0.0025)
+     90 deg: J_h 0.0012  residual RMS 0.112 Nm  (5/5 usable: 0.0007, 0.0010, 0.0012, 0.0012, 0.0012)
+
+VERDICT (STATE 5): INCOMPLETE
+  need 3 heights with >= 3 usable releases each (60 deg: 0 usable)
+
+Cross-checks (reported, NOT gating):
+  friction -0.05 Nm: mean J nan, max deviation nan %, 60: nan, 75: 0.0030, 90: 0.0016 -> INCOMPLETE
+  friction +0.05 Nm: mean J nan, max deviation nan %, 60: nan, 75: 0.0019, 90: 0.0007 -> INCOMPLETE
+  Method B (one J + one constant f): J 0.0003, f 0.957 Nm; per height with that f: 75: 0.0007, 90: -0.0001
+  y from TAU_SPRING_TABLE (the Oct 14 primary): 60: nan (0 usable), 75: 0.0033 (5 usable), 90: 0.0020 (5 usable)
+  input_voltage during free phases: 19.47-19.51 V (back-EMF check)
+  |mean iq| in windows: max 0.002 A
+
+plot: logs/summaries/phase2/j_release/j_release_fit_20261015.png

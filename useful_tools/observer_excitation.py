@@ -9,6 +9,13 @@ USAGE
         --arm-mass-kg 0 --arm-com-m 0.2739
     python3 useful_tools/observer_excitation.py --mode sine \\
         --freq-hz 0.3 --arm-mass-kg 1.5025 --arm-com-m 0.2739
+    python3 useful_tools/observer_excitation.py --mode sine --j-sine \\
+        --arm-mass-kg 0 --arm-com-m 0 --center-deg 65 --amp-deg 5 \\
+        --freq-hz 2.5 --cycles 14 --velocity 0.10 --soft-start-s 0.3
+
+--j-sine (Oct 15): the J sine test (fit_j_sine.py). Bare rig, small fast sines;
+raises limit_velocity_max to 2 rad/s and limit_acc_max to 30 rad/s^2 for that
+run only (see the J_SINE_* constants). Aborts and current limits unchanged.
 
 Real-time priority (sudo chrt -f 80) is deliberately deferred: the position
 loop runs in the actuator firmware, so host jitter only delays goal updates
@@ -97,6 +104,22 @@ IQ_TRIP_A = 5.3              # A, |present_iq| immediate abort (one sample)
 MIN_SOFT_START_S = 0.3       # s, floor on --soft-start-s
 MIN_CONST_SPAN_DEG = 20.0    # deg, sweep legs must have this much at full speed
 
+# --- J sine test (--j-sine; PLAN Block 4b, pinned 2026-10-15) -------------------
+# Small, fast sines on the BARE rig to identify J from how the in-phase motor
+# torque grows with frequency^2 (fit_j_sine.py). The default limits below
+# (1 rad/s, 5 rad/s^2) would flatten a 2.5 Hz sine, so --j-sine raises the
+# Position-Mode velocity/acceleration limits FOR THIS MODE ONLY. Current limits
+# (limit_i_max 5.5 A) and every abort (IQ_ABORT_A, IQ_TRIP_A, TRACKING_ABORT,
+# temperature, run cap, park) are unchanged.
+J_SINE_MAX_GOAL_VELOCITY = 1.5    # rad/s, sampled sine goal (default modes 0.8)
+J_SINE_MAX_GOAL_ACC = 27.0        # rad/s^2, sampled sine goal (90% of the limit)
+J_SINE_LIMIT_VELOCITY_MAX = 2.0   # rad/s, firmware limit_velocity_max (default 1.0)
+J_SINE_LIMIT_ACC_MAX = 30.0       # rad/s^2, firmware limit_acc_max (default 5.0)
+J_SINE_MAX_AMP_DEG = 6.0          # deg
+J_SINE_CENTER_MIN_DEG = 60.0      # deg (actuator); keeps the spring loading the
+J_SINE_CENTER_MAX_DEG = 90.0      #   gears one way and current under the aborts
+J_SINE_MAX_FREQ_HZ = 3.0
+
 # --- Arguments: parsed and checked BEFORE BearInterface() opens the port ----
 _ap = argparse.ArgumentParser(
     description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -118,6 +141,11 @@ _ap.add_argument('--center-deg', type=float, default=60.0,
                  help='sine center, actuator deg (default 60)')
 _ap.add_argument('--cycles', type=int, default=5,
                  help='sine cycles incl. ramp-in and ramp-out (default 5, min 3)')
+_ap.add_argument('--j-sine', action='store_true',
+                 help='J sine test: bare rig, sine only, amp <= '
+                      f'{J_SINE_MAX_AMP_DEG:g} deg, centre {J_SINE_CENTER_MIN_DEG:g}-'
+                      f'{J_SINE_CENTER_MAX_DEG:g} deg, <= {J_SINE_MAX_FREQ_HZ:g} Hz; '
+                      'raises limit_velocity_max / limit_acc_max for this run only')
 _args = _ap.parse_args()
 
 if not SAFETY_CHECKS_CONFIRMED:
@@ -143,6 +171,23 @@ SOFT_START = _args.soft_start_s   # s to ramp velocity up at the start of a leg
 if not SOFT_START >= MIN_SOFT_START_S:
     _ap.error(f"--soft-start-s must be >= {MIN_SOFT_START_S}")
 
+J_SINE = _args.j_sine
+if J_SINE:
+    if MODE != 'sine':
+        _ap.error("--j-sine needs --mode sine")
+    if ARM_MASS_KG != 0.0:
+        _ap.error("--j-sine is for the bare rig only (--arm-mass-kg 0)")
+    if _args.freq_hz is None or not 0.0 < _args.freq_hz <= J_SINE_MAX_FREQ_HZ:
+        _ap.error(f"--j-sine needs 0 < --freq-hz <= {J_SINE_MAX_FREQ_HZ:g}")
+    if not 0.0 < _args.amp_deg <= J_SINE_MAX_AMP_DEG:
+        _ap.error(f"--j-sine needs 0 < --amp-deg <= {J_SINE_MAX_AMP_DEG:g}")
+    if not J_SINE_CENTER_MIN_DEG <= _args.center_deg <= J_SINE_CENTER_MAX_DEG:
+        _ap.error(f"--j-sine needs {J_SINE_CENTER_MIN_DEG:g} <= --center-deg <= "
+                  f"{J_SINE_CENTER_MAX_DEG:g}")
+# Peak goal velocity allowed for the sine itself. The approach leg (--velocity)
+# keeps MAX_GOAL_VELOCITY in every mode (checked above).
+SINE_GOAL_V_CAP = J_SINE_MAX_GOAL_VELOCITY if J_SINE else MAX_GOAL_VELOCITY
+
 # --- Sweep (validate_model.py's legs, clipped to the envelope) --------------
 SWEEP_TOP_DEG = 100.0
 SWEEP_BOTTOM_DEG = 30.0      # was 20: bare down-leg |iq| peaks ~4.8 A at 20
@@ -157,8 +202,8 @@ IQ_P, IQ_I, IQ_D = 0.02, 0.02, 0.0
 VEL_P, VEL_I, VEL_D = 4.5, 0.001, 0.0
 POS_P, POS_I, POS_D = 5.0, 0.0, 0.2
 LIMIT_I_MAX = 5.5
-LIMIT_VELOCITY_MAX = 1.0
-LIMIT_ACC_MAX = 5.0
+LIMIT_VELOCITY_MAX = J_SINE_LIMIT_VELOCITY_MAX if J_SINE else 1.0
+LIMIT_ACC_MAX = J_SINE_LIMIT_ACC_MAX if J_SINE else 5.0
 
 TRACKING_ABORT = math.radians(15.0)   # goal vs actual divergence
 
@@ -273,24 +318,35 @@ if MODE == 'sine':
                   f" deg, outside envelope {ENVELOPE_MIN_DEG:.0f}.."
                   f"{ENVELOPE_MAX_DEG:.0f} deg")
     peak_v = math.radians(AMP_DEG) * 2.0 * math.pi * FREQ_HZ
-    if peak_v > MAX_GOAL_VELOCITY:
+    if peak_v > SINE_GOAL_V_CAP:
         _ap.error(f"peak goal velocity A*2*pi*f = {peak_v:.3f} rad/s exceeds "
-                  f"{MAX_GOAL_VELOCITY} rad/s")
+                  f"{SINE_GOAL_V_CAP} rad/s")
     EXCITE_S = CYCLES / FREQ_HZ
-    # Backstop: sample the exact goal function that will be sent and check it.
+    # Backstop: sample the exact goal function that will be sent and check it
+    # (span, peak velocity, and for --j-sine peak acceleration, which must stay
+    # under the firmware limit_acc_max so the setpoint profile does not clip it).
     _dt = min(1e-3, 1.0 / (FREQ_HZ * 2000.0))
-    _prev, _lo, _hi, _vmax = None, float('inf'), float('-inf'), 0.0
+    _prev = _prev_v = None
+    _lo, _hi, _vmax, _amax = float('inf'), float('-inf'), 0.0, 0.0
     for _i in range(int(EXCITE_S / _dt) + 1):
         _g = sine_goal(_i * _dt, math.radians(CENTER_DEG), math.radians(AMP_DEG),
                        FREQ_HZ, CYCLES)
         _lo, _hi = min(_lo, _g), max(_hi, _g)
         if _prev is not None:
-            _vmax = max(_vmax, abs(_g - _prev) / _dt)
+            _v = (_g - _prev) / _dt
+            _vmax = max(_vmax, abs(_v))
+            if _prev_v is not None:
+                _amax = max(_amax, abs(_v - _prev_v) / _dt)
+            _prev_v = _v
         _prev = _g
-    if _lo < ENV_MIN or _hi > ENV_MAX or _vmax > MAX_GOAL_VELOCITY:
+    if _lo < ENV_MIN or _hi > ENV_MAX or _vmax > SINE_GOAL_V_CAP:
         raise SystemExit(f"REFUSED: sampled sine goal spans "
                          f"{math.degrees(_lo):.2f}..{math.degrees(_hi):.2f} deg, "
                          f"peak {_vmax:.3f} rad/s")
+    if J_SINE and _amax > J_SINE_MAX_GOAL_ACC:
+        raise SystemExit(f"REFUSED: sampled sine goal peak acceleration "
+                         f"{_amax:.1f} rad/s^2 > {J_SINE_MAX_GOAL_ACC} rad/s^2")
+    peak_a = _amax
     START_DEG = CENTER_DEG
     CONST_SPAN_DEG = None    # sine has no constant-velocity legs to check
 else:
@@ -314,6 +370,7 @@ else:
                   f"{MIN_CONST_SPAN_DEG:.0f} deg; lower --velocity or "
                   f"--soft-start-s")
     peak_v = VELOCITY
+    peak_a = None
     EXCITE_S = (2.0 * leg_time(math.radians(SWEEP_TOP_DEG - SWEEP_BOTTOM_DEG),
                                VELOCITY) + DWELL_AT_END)
     START_DEG = SWEEP_TOP_DEG
@@ -325,7 +382,8 @@ if EXCITE_S > RUN_CAP_S:
 LOAD_LABEL = 'bare' if ARM_MASS_KG == 0 else 'wrench'
 log_path = os.path.join(
     LOG_DIR, 'phase2', 'observer_csvs',
-    f"observer_{MODE}_{LOAD_LABEL}_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+    f"observer_{'jsine' if J_SINE else MODE}_{LOAD_LABEL}"
+    f"{f'_{FREQ_HZ:g}Hz' if J_SINE else ''}_{time.strftime('%Y%m%d_%H%M%S')}.csv")
 
 
 class Abort(RuntimeError):
@@ -337,9 +395,15 @@ S = {}   # loop state: t_enable, t_prev, next, n, temps, warned
 
 
 def read():
+    """Three single reads, ~1 ms apart. Each reply's arrival time is kept in S
+    (t_pos, t_vel, t_iq) and logged, so analysis can line up position and
+    current exactly (fit_j_sine.py); reads only, no extra bus traffic."""
     pos, err = iface.bear.get_present_position(iface.id)[0]
+    S['t_pos'] = time.monotonic()
     vel, _ = iface.bear.get_present_velocity(iface.id)[0]
+    S['t_vel'] = time.monotonic()
     iq, _ = iface.bear.get_present_iq(iface.id)[0]
+    S['t_iq'] = time.monotonic()
     return pos[0], vel[0], iq[0], err
 
 
@@ -365,6 +429,8 @@ def log_row(writer, now, goal, pos, vel, iq, phase):
         f"{CENTER_DEG:.3f}" if CENTER_DEG is not None else '',
         f"{VELOCITY:.4f}", f"{SOFT_START:.3f}",
         f"{ARM_MASS_KG:.4f}", f"{ARM_COM_M:.4f}",
+        f"{S['t_pos'] - S['t_enable']:.6f}", f"{S['t_vel'] - S['t_enable']:.6f}",
+        f"{S['t_iq'] - S['t_enable']:.6f}",
     ])
     return loop_dt
 
@@ -615,7 +681,10 @@ try:
 
     print(f"\nPlanned run {planned_s:.0f}s (approach {approach_s:.0f}s + "
           f"{MODE} {EXCITE_S:.0f}s), cap {RUN_CAP_S:.0f}s. Peak goal velocity "
-          f"{peak_v:.3f} rad/s.\nKeep a hand near the arm but do NOT support it.")
+          f"{peak_v:.3f} rad/s"
+          f"{'' if peak_a is None else f', peak goal acceleration {peak_a:.1f} rad/s^2'}."
+          f"{' J SINE: limit_velocity_max ' + str(LIMIT_VELOCITY_MAX) + ', limit_acc_max ' + str(LIMIT_ACC_MAX) + ' for this run.' if J_SINE else ''}"
+          f"\nKeep a hand near the arm but do NOT support it.")
     print(f"\nPARK then disable: {PARK_SUMMARY}.")
     input("Press Enter to enable and begin: ")
 
@@ -636,13 +705,19 @@ try:
     f.write(f"# argv: {' '.join(sys.argv)}\n")
     f.write(f"# mode={MODE} arm_mass_kg={ARM_MASS_KG} arm_com_m={ARM_COM_M} "
             f"velocity={VELOCITY} soft_start_s={SOFT_START} freq_hz={FREQ_HZ} "
-            f"amp_deg={AMP_DEG} center_deg={CENTER_DEG} cycles={CYCLES}\n")
-    f.write(f"# units: t s since the enable command (time.monotonic); loop_dt s; "
+            f"amp_deg={AMP_DEG} center_deg={CENTER_DEG} cycles={CYCLES} "
+            f"j_sine={J_SINE}\n")
+    f.write(f"# units: t s since the enable command (time.monotonic), taken at "
+            f"the start of the cycle (before the goal write); loop_dt s; "
             f"goal_pos, pos rad; vel rad/s (present_velocity register); "
             f"present_iq A; w_temp, p_temp C (sampled ~1 Hz, not refreshed "
-            f"during park)\n")
+            f"during park); t_pos, t_vel, t_iq s since the enable command, "
+            f"each taken right after that register's reply arrived\n")
     f.write(f"# envelope_deg={ENVELOPE_MIN_DEG}..{ENVELOPE_MAX_DEG} "
-            f"max_goal_velocity={MAX_GOAL_VELOCITY} run_cap_s={RUN_CAP_S} "
+            f"max_goal_velocity={SINE_GOAL_V_CAP if MODE == 'sine' else MAX_GOAL_VELOCITY} "
+            f"peak_goal_acc={'' if peak_a is None else f'{peak_a:.2f}'} "
+            f"limit_velocity_max={LIMIT_VELOCITY_MAX} limit_acc_max={LIMIT_ACC_MAX} "
+            f"run_cap_s={RUN_CAP_S} "
             f"iq_abort_a={IQ_ABORT_A}x{IQ_ABORT_COUNT} iq_trip_a={IQ_TRIP_A} "
             f"tracking_abort_deg={math.degrees(TRACKING_ABORT):.1f} "
             f"loop_period_s={LOOP_PERIOD_S} const_span_deg="
@@ -665,7 +740,7 @@ try:
     writer.writerow(['t', 'loop_dt', 'goal_pos', 'pos', 'vel', 'present_iq',
                      'w_temp', 'p_temp', 'mode', 'phase', 'freq_hz',
                      'amp_deg', 'center_deg', 'velocity', 'soft_start_s',
-                     'arm_mass_kg', 'arm_com_m'])
+                     'arm_mass_kg', 'arm_com_m', 't_pos', 't_vel', 't_iq'])
 
     # Loop state is initialised BEFORE the enable command, so the park can
     # always log even if enabling itself fails part-way.

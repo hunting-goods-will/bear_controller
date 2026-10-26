@@ -1,0 +1,33 @@
+==============================================================================
+  J SINE FIT -- in-phase stiffness vs w^2 (pinned 2026-10-15)
+==============================================================================
+run: observer_jsine_bare_0.5Hz_20261015_214657.csv  f 0.5 Hz  cycles 6  centre 65  amp 5  END: complete
+run: observer_jsine_bare_1Hz_20261015_214859.csv  f 1 Hz  cycles 8  centre 65  amp 5  END: complete
+run: observer_jsine_bare_1.5Hz_20261015_214948.csv  f 1.5 Hz  cycles 10  centre 65  amp 5  END: complete
+run: observer_jsine_bare_2Hz_20261015_215057.csv  f 2 Hz  cycles 12  centre 65  amp 5  END: complete
+run: observer_jsine_bare_2.5Hz_20261015_215156.csv  f 2.5 Hz  cycles 14  centre 65  amp 5  END: complete
+KT 0.67 Nm/A (datasheet); J in KT units
+
+   f Hz     w^2     n   cyc  amp deg goal deg lag deg     K_in     K_q  f_coul     tau range N m sgn chg
+   0.50     9.9  1599  4.00    2.524    5.000   -55.7   12.352   14.99   0.519   -2.466..-0.251    0.0%
+   1.00    39.5  1200  6.00    1.495    5.000   -51.7   20.005   17.69   0.363   -2.354..-0.266    0.0%
+   1.50    88.8  1066  7.99    1.236    5.000   -51.8   20.570   19.25   0.326   -2.302..-0.347    0.0%
+   2.00   157.9   999  9.99    1.044    5.000   -53.3   22.879   22.33   0.320   -2.251..-0.428    0.0%
+   2.50   246.7   958 11.98    0.949    5.000   -58.2   20.247   25.50   0.332   -2.334..-0.411    0.0%
+
+Line K_in = k0 - J*w^2 over 5 runs: J -0.02524 kg m^2, k0 16.471 N m/rad, R^2 0.3623, residual RMS 2.858 N m/rad
+
+VERDICT (pinned Block 4b): INCOMPLETE
+  observer_jsine_bare_1Hz_20261015_214859.csv: amplitude 1.49 deg < 2.0
+  observer_jsine_bare_1.5Hz_20261015_214948.csv: amplitude 1.24 deg < 2.0
+  observer_jsine_bare_2Hz_20261015_215057.csv: amplitude 1.04 deg < 2.0
+  observer_jsine_bare_2.5Hz_20261015_215156.csv: amplitude 0.95 deg < 2.0
+
+Cross-checks (reported, NOT gating):
+  cycle-start clock for both signals (no skew correction): J -0.02232
+  without the 1.0 Hz run: J -0.03243
+  fundamental only (no harmonics in the fit): J -0.02528
+  intercept k0 16.471 vs sweep -dy/dtheta at the centre 1.721 N m/rad; sweep friction there 0.844 N m
+  max |iq| in windows: 3.681 A
+
+plot: logs/summaries/phase2/j_sine/j_sine_fit_20261015.png
