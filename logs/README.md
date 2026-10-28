@@ -140,13 +140,52 @@ temperatures every loop, with `loop_dt`. Every file starts with `#` header
 lines (argv, all limits, set/readback of gains and limits, park target) and
 ends with `# END:` / `# PARK:` outcome lines; read with
 `pd.read_csv(path, comment='#')`. The `# ... started` header line (time of
-enable) is the authoritative start time. Dated 2026-09-30.
+enable) is the authoritative start time. Dated 2026-09-30 to 2026-10-15.
+
+Provenance: observer_excitation.py logs no git hash. The Oct 14–15 sweeps
+have the 17-column schema of the committed `501db9b` version. The `jsine`
+runs have the 20-column schema (adds `t_pos, t_vel, t_iq`) of the version
+committed later in `94a319f`; the file was last modified Oct 15 21:42,
+before the first sine run.
 
 | File | Notes |
 |---|---|
 | `observer_sweep_bare_20260930_144400_ABORTED.csv.gz` | Bare rig, sweep at 0.10 rad/s, **aborted** on the down leg: \|present_iq\| > 4.0 A for 3 samples (4.095 A at act 59.6°). The 4.0 A threshold came from a friction-free estimate; normal bare down-leg current is 3.2–4.8 A (August `model_validation` runs), so it was raised to 5.0 A (trip 5.3 A). Run with the old park: parked LOW at 24° (up to −4.8 A pulling against the spring), and on release the bare arm sprang into the top stop. The park now goes HIGH (110°) on a bare rig. |
 | `observer_sweep_bare_20260930_150800.csv.gz` | Bare rig, sweep at 0.10 rad/s, **complete**, with the fixed settings: current abort 5.0 A ×3 / trip 5.3 A, sweep 100→30→100°, park HIGH at 110°. Peak \|present_iq\| 4.62 A. |
 | `observer_sweep_wrench_20260930_162234.csv.gz` | Light wrench, **0.711 kg @ 0.1651 m** (per-row `arm_mass_kg`/`arm_com_m`; "wrench" in the name only means mass ≠ 0), sweep at 0.10 rad/s, **complete**, same limits as `150800`. Park chosen from the torque model: net = τ_spring 3.021 − τ_gravity 2.240 = +0.781 Nm at vest 96°, so the spring wins and it parked HIGH at 110°. Peak \|present_iq\| 2.75 A (approach leg, act 107°). |
+| `observer_sweep_bare_20261014_220311.csv.gz` | Bare rig, sweep at 0.10 rad/s, `--soft-start-s 0.3`, **complete**, parked. Peak \|present_iq\| 4.67 A. Same-session sweep before `j_release_20261014_220710`. |
+| `observer_sweep_bare_20261015_000248.csv.gz` | As `220311`, **complete**, parked. Peak \|present_iq\| 4.62 A. Same-session sweep before `j_release_20261015_000441`. |
+| `observer_sweep_bare_20261015_202707.csv.gz` | As `220311`, **complete**, parked. Peak \|present_iq\| 4.64 A. The **before** sweep of the J release fit (`main`: `logs/summaries/phase2/j_release/j_release_fit_20261015.txt`). |
+| `observer_sweep_bare_20261015_205603.csv.gz` | As `220311`, **complete**, parked. Peak \|present_iq\| 4.59 A. The **after** sweep of the J release fit. Against `202707`: RMS dy 0.017 (max 0.030), RMS df 0.053 (max 0.087) N m over 14 bins, act 33–98°, so STABLE. Their average y sits 0.01–0.11 N m below `TAU_SPRING_TABLE` − rig gravity at act 43–98°. |
+| `observer_jsine_bare_0.5Hz_20261015_214657.csv.gz` | J sine test (`--j-sine`): bare, centre 65°, amp 5°, 6 cycles, limit_velocity_max 2.0 / limit_acc_max 30 for the run. **Complete**, parked. Peak \|present_iq\| 3.77 A. Measured amplitude 2.52° of the 5° goal. |
+| `observer_jsine_bare_1Hz_20261015_214859.csv.gz` | As `0.5Hz`, 1.0 Hz, 8 cycles. **Complete**, parked. Peak 3.60 A. Measured amplitude 1.50°. |
+| `observer_jsine_bare_1.5Hz_20261015_214948.csv.gz` | As `0.5Hz`, 1.5 Hz, 10 cycles. **Complete**, parked. Peak 3.66 A. Measured amplitude 1.24°. |
+| `observer_jsine_bare_2Hz_20261015_215057.csv.gz` | As `0.5Hz`, 2.0 Hz, 12 cycles. **Complete**, parked. Peak 3.79 A. Measured amplitude 1.04°. |
+| `observer_jsine_bare_2.5Hz_20261015_215156.csv.gz` | As `0.5Hz`, 2.5 Hz, 14 cycles. **Complete**, parked. Peak 3.64 A. Measured amplitude 0.95°. J sine fit over the five runs (`main`: `logs/summaries/phase2/j_sine/j_sine_fit_20261015.txt`): J −0.025 kg m², R² 0.36, verdict **INCOMPLETE**. The arm tracked only 19–50 % of the goal amplitude (stick-slip). |
+
+### `phase2/j_release/` — J release test (Block 4, abandoned method)
+Producer: `useful_tools/j_release_test.py` (on `main` since `fdf0c7a`, last
+changed in `c971b22`; each file logs the git hash it ran at). **Enables torque (Position Mode).** Bare rig: holds
+the arm at 90 / 75 / 60° in Position Mode, then `disable()` releases it and
+the spring drives it free into the top stop while the script only reads. One
+row per bus cycle; `#` header (argv, plan, settle/free rules, script git hash
+and dirty flag); `#` footer with one line per release and an `END` line. Read
+with `pd.read_csv(path, comment='#')`. Fitted by `fit_j_release.py`, verdict
+**INCOMPLETE** (`main`: `logs/summaries/phase2/j_release/j_release_fit_20261015.txt`).
+Dated 2026-10-14 to 2026-10-15.
+
+| File | Notes |
+|---|---|
+| `j_release_20261014_220710.csv.gz` | git `7612843`, clean. `--repeats 1`. **Aborted** before the first release: the hold at 90° did not settle within 3.0 s (\|vel\| 0.001). No release. |
+| `j_release_20261015_000441.csv.gz` | git `7612843`, **dirty**. `--repeats 1`. One release from 90° (hold −3.005 A, peak \|vel\| 5.03 rad/s), then **stopped**: error byte 0x90 (bit 4, Joint Limit) in the free phase. |
+| `j_release_20261015_202949.csv.gz` | git `c971b22`, clean. `--repeats 1`, **complete**, 3 releases (90 / 75 / 60°). Hold current −2.55 / −2.95 / −3.56 A; peak \|vel\| 3.07 / 4.27 / 5.37 rad/s; `disable()` confirmed on attempt 1 in ≤ 2.2 ms each. Used in the fit. |
+| `j_release_20261015_204934.csv.gz` | git `c971b22`, clean. `--repeats 2`, **complete**, 6 releases. Peak \|vel\| 3.78–5.46 rad/s (highest from 60°). Used in the fit. |
+| `j_release_20261015_205429.csv.gz` | git `c971b22`, clean. `--repeats 2`, **complete**, 6 releases. Peak \|vel\| 3.49–5.78 rad/s (highest from 60°). Used in the fit. In all three fitted files the 60° releases had only 4–5 window samples (< 8), so they were unusable. |
+
+### `phase2/probes/` — one-off register probes
+| File | Notes |
+|---|---|
+| `goal_write_probe_20261014_214721.csv.gz` | `goal_write_probe.py` (added on `main` in `7612843`). **Never enables.** Trials A (mode already 2), B (goal written right after the mode change) and C (50 ms wait), 5 each; rows `trial, k, mode_ms, present, goal_before, first_read, last_read, reads, match_ms`. 14 of 15 writes read back after 58.9 ms (±0.05 ms) in every trial type. A1 (a 0.0325 rad step) was only 0.0232 rad along after 100 ms. So the read-back is a motion-profiled setpoint, not a lost write. This is the basis for `enable_position_mode()`'s settle poll and `GOAL_SETTLE_S`. |
 
 ### `phase2/latency/` — serial comm-budget timing
 Producer: `useful_tools/measure_comm_budget.py` (added on `main` in
