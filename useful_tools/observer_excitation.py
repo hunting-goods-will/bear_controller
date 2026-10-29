@@ -207,6 +207,16 @@ LIMIT_ACC_MAX = J_SINE_LIMIT_ACC_MAX if J_SINE else 5.0
 
 TRACKING_ABORT = math.radians(15.0)   # goal vs actual divergence
 
+# Firmware top position limit (limit_position_max). NOT the goal clamp: every
+# goal this script sends is still clamped to MAX_ANGLE (118 deg) in software.
+# The firmware latches a Joint Limit error (0x90, torque_enable reads 3) whenever
+# the arm passes this limit, even when disabled. The released bare arm hits the
+# top stop (~116.3-117.2 deg) and bounces past it (Oct 15: up to 120.18 deg), so
+# at 118 deg the park release left the actuator latched (Oct 28, after H0;
+# hold_bench_test refused to start). 125 deg = the flash value, so after a run the
+# actuator is left as after a power-up; same choice as j_release_test (LEGACY #59).
+FIRMWARE_POSITION_MAX = math.radians(125.0)   # 2.1817 rad
+
 # Written in this order, then every one read back and compared before enabling.
 SETTINGS = [
     ('p_gain_iq', IQ_P), ('i_gain_iq', IQ_I), ('d_gain_iq', IQ_D),
@@ -218,7 +228,7 @@ SETTINGS = [
     ('limit_velocity_max', LIMIT_VELOCITY_MAX),
     ('limit_acc_max', LIMIT_ACC_MAX),
     ('limit_position_min', MIN_ANGLE),
-    ('limit_position_max', MAX_ANGLE),
+    ('limit_position_max', FIRMWARE_POSITION_MAX),
 ]
 
 # Registers are float32; anything further off than this did not take.
@@ -654,9 +664,11 @@ try:
             f"hard stop ({HARD_STOP_DEG} deg). Check the homing offset.")
     if pos >= MAX_ANGLE:
         print(f"\nNote: resting at {math.degrees(pos):.2f} deg, above MAX_ANGLE "
-              f"({math.degrees(MAX_ANGLE):.1f}). Position Mode will grab here and "
-              f"the first goal is clamped into range. This is expected -- the "
-              f"load cannot be repositioned by hand.")
+              f"({math.degrees(MAX_ANGLE):.1f}). Position Mode will grab here "
+              f"(firmware limit {math.degrees(FIRMWARE_POSITION_MAX):.0f} deg) and "
+              f"the first goal is clamped to {math.degrees(MAX_ANGLE):.0f} deg, a "
+              f"small step down. This is expected -- the load cannot be "
+              f"repositioned by hand.")
 
     approach_s = leg_time(abs(pos - math.radians(START_DEG)), VELOCITY)
     planned_s = approach_s + EXCITE_S

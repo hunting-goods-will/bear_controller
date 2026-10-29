@@ -170,10 +170,14 @@ class Clock:
 
 class PosFake:
     def __init__(self, clock, start_deg=116.5, top_stop_deg=116.5, seed=27,
-                 drop=(), err=0x80, temp=30.0):
+                 drop=(), err=0x80, temp=30.0, bounce_deg=3.0):
         self.clock = clock
         clock.sim = self
         self.top = math.radians(top_stop_deg)
+        # A free arm hitting the top stop bounces past it (Oct 15: 120.18 deg from a
+        # 116.3 deg rest). If the bounce passes the WRITTEN limit_position_max the
+        # firmware latches Joint Limit: error 0x90, torque_enable reads 3 (Oct 28).
+        self.bounce = math.radians(bounce_deg)
         self.pos, self.vel, self.iq = math.radians(start_deg), 0.0, 0.0
         self.sp, self.sp_v = 0.0, 0.0          # setpoint profile starts at 0
         self.te = self.te_visible = 0
@@ -247,6 +251,11 @@ class PosFake:
                 self.vel = 0.0 if new * self.vel < 0 else new
             self.pos += self.vel * h
         if self.pos >= self.top:
+            if (self.te == 0 and self.vel > 0.2
+                    and self.top + self.bounce > self.regs['limit_position_max']):
+                self.err = 0x90
+                self.te = self.te_visible = 3
+                self.te_change_at = None
             self.pos, self.vel = self.top, min(self.vel, 0.0)
 
     def _read(self, name):
@@ -278,6 +287,8 @@ class PosFake:
         if name == 'torque_enable' and self.prev_bus_was_write:
             self.lost.append((self.clock.t, name, value))
             return
+        if name == 'goal_iq' and self.regs['mode'] not in (0, 3):
+            return             # SDK 1.2.0: goal_iq writable only in modes 0 and 3
         if name == 'goal_position':
             if self.regs['mode'] in (2, 3) and \
                     self.regs['limit_position_min'] <= value <= self.regs['limit_position_max']:
@@ -620,9 +631,13 @@ def section4():
     check("limits: velocity 1.0, acc 5.0, i_max 5.5",
           (vals['limit_velocity_max'], vals['limit_acc_max'], vals['limit_i_max']) == (1.0, 5.0, 5.5),
           f"{vals['limit_velocity_max']}, {vals['limit_acc_max']}, {vals['limit_i_max']}")
-    check("position limits = config MIN/MAX_ANGLE (5 / 118 deg)",
+    check("firmware position limits: min = MIN_ANGLE (5), max = 125 deg (flash value)",
           abs(vals['limit_position_min'] - cfg.MIN_ANGLE) < 1e-9
-          and abs(vals['limit_position_max'] - cfg.MAX_ANGLE) < 1e-9)
+          and abs(vals['limit_position_max'] - math.radians(125.0)) < 1e-9,
+          f"max {math.degrees(vals['limit_position_max']):.2f} deg")
+    gmax = max(v for _, n, v in w[20:] if n == 'goal_position')
+    check("every goal sent after enable is still clamped to MAX_ANGLE (118 deg)",
+          gmax <= cfg.MAX_ANGLE + 1e-12, f"max goal {math.degrees(gmax):.3f} deg")
     check("then mode 2 -> goal_position -> torque_enable 1",
           nm[17:20] == ['mode', 'goal_position', 'torque_enable'] and w[17][2] == 2 and w[19][2] == 1,
           ' -> '.join(nm[17:20]))
@@ -660,6 +675,18 @@ def section4():
     check("released at ~108-110 deg (real: 108.1-108.2), arm then rises to the top stop",
           107.0 < at_release < 110.5 and abs(math.degrees(fake.pos) - 116.5) < 0.1,
           f"{at_release:.1f} -> {math.degrees(fake.pos):.1f} deg")
+    check("after the release bounce (3 deg past the stop) no Joint Limit latch: "
+          "error 0x80, torque_enable 0 (ready for hold_bench_test)",
+          fake.err == 0x80 and fake.te_visible == 0, f"error {hex(fake.err)}, te {fake.te_visible}")
+    # the fake reproduces Oct 28: same release with the old 118 deg limit latches
+    for lim, want in ((118.0, 0x90), (125.0, 0x80)):
+        c2 = Clock()
+        f2 = PosFake(c2, start_deg=108.0, top_stop_deg=117.2)
+        f2.regs['limit_position_max'] = math.radians(lim)
+        c2.advance(2.0)
+        check(f"fake model: release from 108 deg with limit {lim:.0f} deg -> error {hex(want)}",
+              f2.err == want and abs(math.degrees(f2.pos) - 117.2) < 0.1,
+              f"error {hex(f2.err)}, te {f2.te_visible}")
     err_max = max(abs(g - p) for g, p in zip(goal, pos))
     check("tracking error stays well inside the 15 deg abort", math.degrees(err_max) < 5.0,
           f"max {math.degrees(err_max):.2f} deg")
@@ -843,10 +870,16 @@ def section5():
     r = run_h0("5. start at 118.6 deg (above MAX_ANGLE, below hard stop)", start_deg=118.6,
                top_stop_deg=118.6)
     fake = r['fake']
-    check("start 118.6 deg: refused by enable_position_mode (goal ignored), motor never on",
-          r['rc'] != 0 and fake.t_enable is None, f"rc {str(r['rc'])[:70]}")
-    check("NOTE: script prints 'Position Mode will grab here' for this case, but it "
-          "is refused", 'will grab here' in r['out'])
+    gl = [v for _, n, v in fake.writes if n == 'goal_position']
+    check("start 118.6 deg: accepted (limit 125), enable goal = 118.6, every later goal "
+          "<= 118 (a 0.6 deg step down), completes",
+          r['rc'] == 0 and abs(math.degrees(gl[0]) - 118.6) < 0.1
+          and max(gl[1:]) <= cfg.MAX_ANGLE + 1e-12,
+          f"rc {str(r['rc'])[:40]}; enable goal {math.degrees(gl[0]):.2f}, later max "
+          f"{math.degrees(max(gl[1:])):.2f} deg")
+    check("start 118.6 deg: prints the 'will grab here ... clamped to 118' note",
+          'will grab here' in r['out'] and 'clamped to 118' in r['out'])
+    ends_disabled(fake, "start 118.6")
     if r['csv']:
         os.remove(r['csv'])
 

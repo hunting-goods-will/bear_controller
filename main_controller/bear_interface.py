@@ -40,17 +40,21 @@ class BearInterface:
             raise RuntimeError(f"enable refused: error byte {hex(err)} "
                                f"(call disable() to clear it)")
 
-        # Zero the command first, and confirm it.
-        self.bear.set_goal_iq((self.id, 0.0))
-        (goal,), _ = self.bear.get_goal_iq(self.id)[0]
-        if goal is None or goal != 0.0:
-            raise RuntimeError(f"enable refused: goal_iq reads {goal}, not 0")
-
-        # Torque mode, and confirm it (a lost write could leave Position Mode).
+        # Torque mode FIRST, and confirm it. goal_iq can only be written in modes
+        # 0 and 3 (SDK 1.2.0 §2.2.2): after a Position-Mode script the actuator is
+        # still in mode 2, where a goal_iq write is ignored (Oct 28: read back
+        # -5.5 A after the H0 sweep, so enable refused). Changing mode while
+        # disabled makes no torque.
         self.bear.set_mode((self.id, 0))
         (mode,), _ = self.bear.get_mode(self.id)[0]
         if mode != 0:
             raise RuntimeError(f"enable refused: mode reads {mode}, not 0")
+
+        # Then zero the command, and confirm it (in mode 0 the write takes).
+        self.bear.set_goal_iq((self.id, 0.0))
+        (goal,), _ = self.bear.get_goal_iq(self.id)[0]
+        if goal is None or goal != 0.0:
+            raise RuntimeError(f"enable refused: goal_iq reads {goal}, not 0")
 
         # Enable, and confirm it. On the bench (Oct 13) one read-back taken
         # right after the write still showed the old value, so poll for up to

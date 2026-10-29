@@ -52,6 +52,8 @@ def _no_real_bear(*a, **k):
 Manager.BEAR = _no_real_bear      # before bear_interface is imported
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# This repo's main_controller first (not whatever the venv's editable install points to).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from main_controller import bear_interface as bi                     # noqa: E402
 from main_controller.controller import (TAU_SPRING_TABLE, RIG_MGL,    # noqa: E402
                                         KT, PHI_DEG)
@@ -210,6 +212,8 @@ class FakeBear:
                 self.err = 0x80
             self.te = value
             self.te_change_at = self.clock.t + TE_LAG_S
+        elif name == 'goal_iq' and self.regs['mode'] not in (0, 3):
+            return             # SDK 1.2.0: goal_iq writable only in modes 0 and 3
         else:
             self.regs[name] = value
 
@@ -476,6 +480,19 @@ def main():
     check("not started without GO (ZERO writes, no CSV)",
           res['rc'] == 1 and not res['writes'] and res['csv'] is None)
 
+    # Oct 28: after a Position-Mode sweep the actuator is left in mode 2 with a
+    # stale goal_iq (read -5.5 A); the old enable() wrote goal_iq before mode 0,
+    # the write was ignored, and enable refused.
+    clock = Clock()
+    fake = FakeBear(clock)
+    fake.regs['mode'], fake.regs['goal_iq'] = 2, -5.5
+    left = invoke(fake, bare_args(sweep, '--angles', '80'), clock)
+    first_bulk = next((v for _, n, v, via in left['writes'] if n == 'goal_iq' and via == 'bulk'), None)
+    check("actuator left in Position Mode by a sweep (mode 2, goal_iq -5.5): enable "
+          "switches mode first, zeroes goal_iq, run completes, first command 0",
+          left['rc'] == 0 and 'END completed' in (end_line(left) or '') and first_bulk == 0.0,
+          f"{(end_line(left) or str(left['rc']))[:90]}; first bulk goal_iq {first_bulk}")
+
     print("\n3. Bare run, J 0.015 (the full default plan)")
     clock = Clock()
     fake = FakeBear(clock, J=0.015)
@@ -487,9 +504,9 @@ def main():
     for line in write_summary(bare['writes']):
         print(f"      {line}")
     seq = [(n, v) for _, n, v, via in bare['writes'] if not (n == 'goal_iq' and via == 'bulk')]
-    check("write order: watchdog 10000, goal_iq 0, mode 0, torque_enable 1, ..., "
+    check("write order: watchdog 10000, mode 0, goal_iq 0, torque_enable 1, ..., "
           "goal_iq 0, torque_enable 0, watchdog 0",
-          seq == [('watchdog_timeout', 10000), ('goal_iq', 0.0), ('mode', 0),
+          seq == [('watchdog_timeout', 10000), ('mode', 0), ('goal_iq', 0.0),
                   ('torque_enable', 1), ('goal_iq', 0.0), ('torque_enable', 0),
                   ('watchdog_timeout', 0)], str(seq))
     ev = fake.events
