@@ -13,7 +13,136 @@ git show raw-data:<path> | gunzip
 
 e.g. `git show raw-data:logs/human_live_csvs/human_live_20260821_002111.csv.gz | gunzip > run.csv`
 
-## File index
+## Index by session
+
+One table per session date, built from each CSV's own header (`#` lines) and END/PARK
+lines; files with no header say "not recorded". Spring: L1 = Level 1, Low zone (through
+Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, no rows.
+"Summaries" = files on `main` under `logs/` that cite this run. "Run notes" = yes if the
+folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
+Paths are under `logs/`.
+
+### 2026-10-29
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/hold_bench/hold_bench_20261029_143245.csv.gz` | H1 bare | L2 | i_max 8.5, angles [90, 80, 70] | ABORT: speed 2.04 rad/s (from position) > 2.0 for 3 cycles | 8deb8e4 clean | `summaries/phase2/hold_bench/hold_bench_20261029_L2.txt` | yes |
+| `phase2/hold_bench/hold_bench_20261029_144749.csv.gz` | refusal (H2 payload) | L2 | i_max 8.5, angles [90, 80], payload 1.137 kg r 0.213 m angle 0.0 | REFUSED/FAILED: limit_i_max read back 5.5, wrote 8.5 A -- **no data** | 8deb8e4 clean | - | yes |
+| `phase2/hold_bench/hold_bench_20261029_145004.csv.gz` | H2 payload | L2 | i_max 8.5, angles [90, 80], payload 1.137 kg r 0.213 m angle 0.0 | completed | 8deb8e4 clean | `summaries/phase2/hold_bench/hold_bench_20261029_L2.txt` | yes |
+| `phase2/hold_bench/hold_thermal_20261029_150849.csv.gz` | H3 thermal | L2 | i_max 7.5, angles [95], idle_s 1200, thermal_s 1200 | ABORT: idle log: read failed | 8deb8e4 clean | - | yes |
+| `phase2/hold_bench/hold_thermal_20261029_151735.csv.gz` | H3 thermal | L2 | i_max 7.5, angles [95], idle_s 1200, thermal_s 1200 | ABORT: idle log: read failed | 8deb8e4 clean | - | yes |
+| `phase2/hold_bench/hold_thermal_20261029_153336.csv.gz` | H3 thermal | L2 | i_max 7.5, angles [95], idle_s 120, thermal_s 1200 | ABORT: exchange failed (all retries used) | 8deb8e4 dirty | `summaries/phase2/hold_bench/hold_bench_20261029_L2.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261029_132956.csv.gz` | H0 sweep | L2 | i_max 7, bottom_deg 40 | abort -- \|present_iq\| > 6.5 A for 3 consecutive samples (last 6.751 A at 73.7 deg); PARK: parked | not recorded | - | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261029_141902.csv.gz` | H0 sweep | L2 | i_max 7, bottom_deg 40 | abort -- \|present_iq\| > 6.5 A for 3 consecutive samples (last 6.638 A at 77.0 deg); PARK: parked | not recorded | - | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261029_142652.csv.gz` | H0 sweep | L2 | i_max 8.5, bottom_deg 60 | complete; PARK: parked | not recorded | `summaries/phase2/hold_bench/hold_bench_20261029_L2.txt`, `summaries/phase2/hold_bench/sweep_compare_20261029.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261029_145313.csv.gz` | H0 sweep | L2 | i_max 8.5, bottom_deg 60 | complete; PARK: parked | not recorded | `summaries/phase2/hold_bench/hold_bench_20261029_L2.txt`, `summaries/phase2/hold_bench/sweep_compare_20261029.txt` | yes |
+
+### 2026-10-28
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/hold_bench/hold_bench_20261028_131713.csv.gz` | refusal (H1 bare) | L1 | i_max 5.5, angles [80, 60, 40] | REFUSED/FAILED: enable refused: goal_iq reads -5.5, not 0 -- **no data** | 617158f dirty | - | yes |
+| `phase2/hold_bench/hold_bench_20261028_131743.csv.gz` | refusal (H1 bare) | L1 | i_max 5.5, angles [80, 60, 40] | REFUSED/FAILED: enable refused: goal_iq reads -5.5, not 0 -- **no data** | 617158f dirty | - | yes |
+| `phase2/hold_bench/hold_bench_20261028_132245.csv.gz` | H1 bare | L1 | i_max 5.5, angles [80, 60, 40] | completed | 617158f dirty | `summaries/phase2/hold_bench/hold_bench_20261028.txt` | yes |
+| `phase2/hold_bench/hold_bench_20261028_184306.csv.gz` | H2 payload | L1 | i_max 5.5, angles [80, 60, 40], payload 1.137 kg r 0.14 m angle 0.0 | completed | 617158f dirty | `summaries/phase2/hold_bench/hold_bench_20261028.txt` | yes |
+| `phase2/hold_bench/hold_thermal_20261028_194521.csv.gz` | H3 thermal | L1 | i_max 5.5, angles [60], thermal_s 600 | ABORT: exchange failed (all retries used) | 617158f dirty | `summaries/phase2/hold_bench/hold_bench_20261028.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261028_125644.csv.gz` | H0 sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/hold_bench/hold_bench_20261028.txt`, `summaries/phase2/hold_bench/sweep_compare_20261028.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261028_192538.csv.gz` | H0 sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/hold_bench/hold_bench_20261028.txt`, `summaries/phase2/hold_bench/sweep_compare_20261028.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261028_193116.csv.gz` | H0 sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/hold_bench/sweep_compare_20261028.txt` | yes |
+
+### 2026-10-15
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/j_release/j_release_20261015_000441.csv.gz` | J test (release) | L1 | --repeats 1 | stopped after the drop -- error byte 0x90 in free phase | 7612843 dirty | - | yes |
+| `phase2/j_release/j_release_20261015_202949.csv.gz` | J test (release) | L1 | --repeats 1 | complete -- 3 releases | c971b22 clean | `summaries/phase2/j_release/j_release_fit_20261015.txt` | yes |
+| `phase2/j_release/j_release_20261015_204934.csv.gz` | J test (release) | L1 | --repeats 2 | complete -- 6 releases | c971b22 clean | `summaries/phase2/j_release/j_release_fit_20261015.txt` | yes |
+| `phase2/j_release/j_release_20261015_205429.csv.gz` | J test (release) | L1 | --repeats 2 | complete -- 6 releases | c971b22 clean | `summaries/phase2/j_release/j_release_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_jsine_bare_0.5Hz_20261015_214657.csv.gz` | J test (sine) | L1 | 0.5 Hz, amp 5.0, centre 65.0 | complete; PARK: parked | not recorded | `summaries/phase2/j_sine/j_sine_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_jsine_bare_1.5Hz_20261015_214948.csv.gz` | J test (sine) | L1 | 1.5 Hz, amp 5.0, centre 65.0 | complete; PARK: parked | not recorded | `summaries/phase2/j_sine/j_sine_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_jsine_bare_1Hz_20261015_214859.csv.gz` | J test (sine) | L1 | 1.0 Hz, amp 5.0, centre 65.0 | complete; PARK: parked | not recorded | `summaries/phase2/j_sine/j_sine_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_jsine_bare_2.5Hz_20261015_215156.csv.gz` | J test (sine) | L1 | 2.5 Hz, amp 5.0, centre 65.0 | complete; PARK: parked | not recorded | `summaries/phase2/j_sine/j_sine_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_jsine_bare_2Hz_20261015_215057.csv.gz` | J test (sine) | L1 | 2.0 Hz, amp 5.0, centre 65.0 | complete; PARK: parked | not recorded | `summaries/phase2/j_sine/j_sine_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261015_000248.csv.gz` | bare sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | - | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261015_202707.csv.gz` | bare sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/j_release/j_release_fit_20261015.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261015_205603.csv.gz` | bare sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/hold_bench/sweep_compare_20261028.txt`, `summaries/phase2/j_release/j_release_fit_20261015.txt` | yes |
+
+### 2026-10-14
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/j_release/j_release_20261014_220710.csv.gz` | J test (release) | L1 | --repeats 1 | abort -- hold at 90.0 deg not settled within 3.0 s (\|vel\| 0.001) | 7612843 clean | - | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20261014_220311.csv.gz` | bare sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | - | yes |
+| `phase2/probes/goal_write_probe_20261014_214721.csv.gz` | probe (never enables) | L1 |  | 15 trials logged | not recorded | - | yes |
+
+### 2026-10-13
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/watchdog/watchdog_test_20261013_153347.csv.gz` | watchdog T1-T5 (Mode 0) | L1 |  | T1: PASS; T2: PASS; T5 (after T2): FAIL | not recorded | `summaries/phase2/watchdog/watchdog_test_20261013_153347.txt` | yes |
+| `phase2/watchdog/watchdog_test_20261013_154341.csv.gz` | watchdog T1-T5 (Mode 0) | L1 |  | T1: PASS; T2: PASS; T5 (after T2): PASS; T3: RECORD; T5 (after T3): PASS; ABORT: enable failed: torque_enable reads 0, not 1 | not recorded | `summaries/phase2/watchdog/watchdog_test_20261013_154341.txt` | yes |
+| `phase2/watchdog/watchdog_test_20261013_155117.csv.gz` | watchdog T1-T5 (Mode 0) | L1 |  | T1: PASS; T2: PASS; T5 (after T2): PASS; T3: RECORD; T5 (after T3): PASS; T4: FAIL (review); T5 (after T4): FAIL; ABORT: a T5 check failed; remaining tests skipped (can't re-arm from an uncleared trip) | not recorded | `summaries/phase2/watchdog/watchdog_test_20261013_155117.txt` | yes |
+| `phase2/watchdog/watchdog_test_20261013_173054.csv.gz` | watchdog T1-T5 (Mode 0) | L1 |  | T1: PASS; T2: PASS; T5 (after T2): PASS; T3: RECORD; T5 (after T3): PASS; T4: FAIL (review); T5 (after T4): PASS; T5 re-arm: PASS; T5: PASS | not recorded | `summaries/phase2/watchdog/watchdog_test_20261013_173054.txt` | yes |
+
+### 2026-10-06
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/latency/comm_budget_20261006_201203.csv.gz` | comm budget (no torque) | L1 | gap_ms 0.5, SCHED_FIFO:80 | complete (torque_enable_end 0) | 501db9b dirty | `summaries/phase2/latency/comm_budget_20261006_201203.txt` | yes |
+| `phase2/latency/comm_budget_20261006_203436.csv.gz` | comm budget (no torque) | L1 | gap_ms 0.25, SCHED_FIFO:80 | complete (torque_enable_end 0) | 501db9b dirty | `summaries/phase2/latency/comm_budget_20261006_203436.txt` | yes |
+
+### 2026-09-30
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_bare_20260930_144400_ABORTED.csv.gz` | bare sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | abort -- \|present_iq\| > 4.0 A for 3 consecutive samples (last 4.095 A at 59.6 deg); PARK: parked | not recorded | `summaries/phase2/observer/observer_sweep_bare_20260930_144400_ABORTED.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_bare_20260930_150800.csv.gz` | bare sweep | L1 | i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/observer/observer_sweep_bare_20260930_150800.txt`, `summaries/phase2/observer/observer_sweep_wrench_20260930_162234.txt` | yes |
+| `phase2/observer_csvs/observer_sweep_wrench_20260930_162234.csv.gz` | wrench sweep | L1 | load 0.711 kg @ 0.1651 m, i_max 5.5, bottom 30 (pre-option defaults) | complete; PARK: parked | not recorded | `summaries/phase2/observer/observer_sweep_wrench_20260930_162234.txt` | yes |
+
+### 2026-08-21
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `human_live_csvs/human_live_20260821_001640.csv.gz` | Phase 1 live assist (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_live/human_live_20260821_001640.txt` | yes |
+| `human_live_csvs/human_live_20260821_002111.csv.gz` | Phase 1 live assist (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_live/human_live_20260821_002111.txt` | yes |
+| `human_monitor_csvs/human_monitor_20260821_000840.csv.gz` | Phase 1 monitor, 0 torque (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_monitor/human_monitor_20260821_000840.txt` | yes |
+| `human_monitor_csvs/human_monitor_20260821_001025.csv.gz` | Phase 1 monitor, 0 torque (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_monitor/human_monitor_20260821_001025.txt` | yes |
+
+### 2026-08-20
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `model_validation_csvs/model_validation_20260820_234335.csv.gz` | model validation sweep (Position Mode) | L1 |  | not recorded in the file | not recorded | `summaries/model_validation/model_validation_20260820_234335.txt`, `summaries/model_validation/model_validation_20260820_235718.txt` | yes |
+| `model_validation_csvs/model_validation_20260820_235718.csv.gz` | model validation sweep (Position Mode) | L1 |  | not recorded in the file | not recorded | `summaries/model_validation/model_validation_20260820_235718.txt` | yes |
+
+### 2026-08-18
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `human_live_csvs/human_live_20260818_223842.csv.gz` | Phase 1 live assist (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_live/human_live_20260818_223842.txt` | yes |
+| `human_live_csvs/human_live_20260818_223956.csv.gz` | Phase 1 live assist (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_live/human_live_20260818_223956.txt` | yes |
+| `human_live_csvs/human_live_20260818_224009.csv.gz` | Phase 1 live assist (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_live/human_live_20260818_224009.txt` | yes |
+| `human_live_csvs/human_live_20260818_224632.csv.gz` | Phase 1 live assist (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_live/human_live_20260818_224632.txt` | yes |
+| `human_monitor_csvs/human_monitor_20260818_223506.csv.gz` | Phase 1 monitor, 0 torque (human) | L1 | not recorded in the file | not recorded in the file | not recorded | `summaries/human_monitor/human_monitor_20260818_223506.txt` | yes |
+| `velocity_profile_csvs/velocity_profile_20260818_002929.csv.gz` | velocity profile (motor off, human) | L1 |  | not recorded in the file | not recorded | `summaries/velocity_profile/velocity_profile_20260818_002929.txt` | yes |
+
+### 2026-08-17
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `spring_characterization/bidirectional_sweep_20260817_203602.csv.gz` | spring char., discrete-hold, both directions | L1 |  | not recorded in the file | not recorded | `summaries/spring_characterization/bidirectional_sweep_20260817_203602.txt` | yes |
+| `spring_characterization/bidirectional_sweep_20260817_204335.csv.gz` | spring char., discrete-hold, both directions | L1 |  | not recorded in the file | not recorded | `summaries/spring_characterization/bidirectional_sweep_20260817_204335.txt` | yes |
+
+### 2026-08-04
+
+| File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
+|---|---|---|---|---|---|---|---|
+| `spring_characterization/position_sweep_FINAL_20260804_203506.csv.gz` | spring char., one direction | L1 |  | not recorded in the file | not recorded | `summaries/spring_characterization/position_sweep_FINAL_20260804_203506.txt` | yes |
+
+
+## Run notes by folder
+
+Per-folder notes: reviews, corrections and context the headers can't carry.
 
 ### `human_live_csvs/` — live-torque human runs (assist actually applied)
 Producer: `useful_tools/run_assist_human.py --live`. Dates 2026-08-18 and 2026-08-21.
@@ -140,7 +269,7 @@ temperatures every loop, with `loop_dt`. Every file starts with `#` header
 lines (argv, all limits, set/readback of gains and limits, park target) and
 ends with `# END:` / `# PARK:` outcome lines; read with
 `pd.read_csv(path, comment='#')`. The `# ... started` header line (time of
-enable) is the authoritative start time. Dated 2026-09-30 to 2026-10-28.
+enable) is the authoritative start time. Dated 2026-09-30 to 2026-10-29.
 
 Provenance: observer_excitation.py logs no git hash. The Oct 14–15 sweeps
 have the 17-column schema of the committed `501db9b` version. The `jsine`
@@ -167,6 +296,10 @@ version), and `192538` / `193116` used 125° (the version committed in `066bf1d`
 | `observer_sweep_bare_20261028_125644.csv.gz` | Oct 28 H0 (args as `20261014_220311`), **complete**, parked. Peak \|present_iq\| 4.59 A (lowest-of-3 4.44). Ran with the **old** `limit_position_max` = 118° (read-back 2.05949 rad). Per `observer_excitation.py`'s comment, the park release's bounce past 118° latched Joint Limit (0x90) after this run. That isn't recorded in this CSV, which ends `PARK: parked`. The session sweep passed to every Oct 28 `hold_bench_test` run. |
 | `observer_sweep_bare_20261028_192538.csv.gz` | Oct 28 evening H0, **complete**, parked. Peak 4.66 A (lowest-of-3 4.50). First run with `limit_position_max` = **125°** (read-back 2.18166 rad; the fix committed on `main` in `066bf1d`). Against `125644` (389 min earlier): RMS dy 0.084 (max 0.123), RMS df 0.027 N m, so **MOVED** (`main`: `logs/summaries/phase2/hold_bench/sweep_compare_20261028.txt`). |
 | `observer_sweep_bare_20261028_193116.csv.gz` | Repeat of `192538`, 6 min later, limit 125°. **Complete**, parked. Peak 4.63 A (lowest-of-3 4.48). Against `192538`: RMS dy 0.025, RMS df 0.018 N m, so STABLE. |
+| `observer_sweep_bare_20261029_132956.csv.gz` | Oct 29, **spring Level 2** (Low zone; every run from here on). H0 at `--i-max 7 --bottom-deg 40`. **Aborted on the down leg**: \|present_iq\| > 6.5 A for 3 samples (last 6.751 A at 73.7°); parked; limit restored to 5.5. Peak 6.75 A. No up leg, so `sweep_tables` can't use it. |
+| `observer_sweep_bare_20261029_141902.csv.gz` | Repeat of `132956`, same arguments, same **abort** (6.638 A at 77.0°); parked, limit restored. Peak 6.64 A. No up leg. |
+| `observer_sweep_bare_20261029_142652.csv.gz` | H0 at `--i-max 8.5 --bottom-deg 60`, **complete**, parked, limit restored. Peak 8.12 A, lowest-of-3 7.86 A: **0.14 A under the 8.0 A abort**. The session sweep for every Oct 29 hold run. |
+| `observer_sweep_bare_20261029_145313.csv.gz` | As `142652`, **complete**. Peak 7.79 A, lowest-of-3 7.65 A (0.35 A margin). Against `142652` (26 min earlier): RMS dy 0.028, df 0.025 N m over 8 bins, so STABLE (`main`: `logs/summaries/phase2/hold_bench/sweep_compare_20261029.txt`; its margin column assumes 5.0 A, so ignore it for these runs). |
 
 ### `phase2/hold_bench/` — torque-mode hold bench test (H1–H3)
 Producer: `useful_tools/hold_bench_test.py` (on `main` since `617158f`; the file
@@ -181,7 +314,9 @@ gain read-back, predictions, release check); `#` footer (disable confirmation,
 was uncommitted at the time (committed in `066bf1d`). Every run used the session
 sweep `observer_sweep_bare_20261028_125644`. Analysed by `analyze_hold_bench.py`
 (`main`: `logs/summaries/phase2/hold_bench/hold_bench_20261028.{txt,png}`).
-Dated 2026-10-28.
+Oct 29 runs (spring Level 2) log `git 8deb8e4` and used the session sweep
+`observer_sweep_bare_20261029_142652` (`main`: `hold_bench_20261029_L2.{txt,png}`).
+Dated 2026-10-28 to 2026-10-29.
 
 | File | Notes |
 |---|---|
@@ -190,6 +325,12 @@ Dated 2026-10-28.
 | `hold_bench_20261028_132245.csv.gz` | **H1**, bare, **completed**. Peak \|iq\| 4.14 A. Creep u vs the sweep's −y: 80° −0.001, 60° −0.042, 40° −0.018 N m; hunting ≤ 0.25° p-p. The final ramp ended at 112.4° (the arm reached the stop). Loop dt median 2.00 ms, max 3.23 ms; no error bytes. |
 | `hold_bench_20261028_184306.csv.gz` | **H2**, 1.137 kg payload, run with `--payload-r-m 0.14`, but the **measured r is 0.213 m**. **Completed**. Peak \|iq\| 3.11 A. The committed summary's H2 ratios (1.45 / 1.63 / 1.53, "rethink") use the wrong 0.14 m. With 0.213 m, delta-u / (m·g·r·sin) is **0.95 / 1.08 / 1.00** at 80 / 60 / 40°. Also, the header's release check (+0.248 N m, accepted) used 0.14 m. With 0.213 m it would have **refused**: −0.49 N m at 38.5°, which friction (0.93 N m) would hold, so a released weight would not have fallen. The final ramp ended at 103.3°. |
 | `hold_thermal_20261028_194521.csv.gz` | **H3**, bare, still hold at 60°, `--thermal-s 600`. **Aborted after 451 s of the hold: `exchange failed (all retries used)`**, a comm failure, with no error bytes before it. `disable()` was confirmed on attempt 1 and the watchdog reset. 1.92 A rms (u −1.28 N m); winding 25.5 → 26.75 °C, powerstage 28.8 → 32.1 °C (first → last row of the hold). Peak \|iq\| 3.84 A. |
+| `hold_bench_20261029_143245.csv.gz` | Oct 29, **spring Level 2**. **H1**, bare, `--i-max 8.5` (abort 8.0 A), angles 90 / 80 / 70°. All three holds and creeps ran (creep u −2.864 / −2.892 / −3.640 N m; at 70° the creep stuck, 0.75° amplitude, "in between" in the summary). **Aborted on the final up-ramp**: speed 2.04 rad/s from position for 3 cycles. The arm broke away to 79.3° with the target at 75.5°. Disable confirmed, limit restored. Peak \|iq\| 7.57 A. |
+| `hold_bench_20261029_144749.csv.gz` | **H2** (1.137 kg, r 0.213 m) at `--i-max 8.5`. **Refused**: `limit_i_max read back 5.5, wrote 8.5 A`. `set_current_limit()` was called while disabled, but the write did not take, so the read-back check refused before enable. Disable confirmed, limit (re)written 5.5. Header and footer only, **no data**. |
+| `hold_bench_20261029_145004.csv.gz` | **H2**, 1.137 kg at r **0.213 m** (measured), angles 90 / 80°, `--i-max 8.5`. **Completed**; the final ramp ended at 112.4°. Release check +1.210 N m. Peak \|iq\| 4.95 A. H2 ratio 1.43 at 90° ("rethink") and 1.13 at 80° ("looks good") in the summary. |
+| `hold_thermal_20261029_150849.csv.gz` | **H3** with `--idle-s 1200 --thermal-s 1200 --i-max 7.5` at 95°. **Aborted in the idle log** (motor disabled, never armed): `idle log: read failed` after 2334 idle rows (~467 s). A comm failure with the motor off. |
+| `hold_thermal_20261029_151735.csv.gz` | Same as `150849`, same **abort**: `idle log: read failed` after 2362 idle rows (~472 s), motor disabled. |
+| `hold_thermal_20261029_153336.csv.gz` | **H3**, `--idle-s 120 --thermal-s 1200 --i-max 7.5`, still hold at 95°. Idle log flat (winding 25.25 → 25.00 °C). **Aborted after 349 s of the hold: `exchange failed (all retries used)`**, a comm failure; disable confirmed, limit restored. 4.82 A rms (u −3.23 N m); winding 26.0 → 31.2 °C, powerstage 28.7 → 36.4 °C. Peak \|iq\| 5.99 A. **The only Oct 29 run logged `dirty=yes`: it ran with `COMM_TRY_NUM = 5`** (committed value 3) in `main_controller/config.py`, edited at 15:09:39 and put back at 15:39:44 (VS Code local history). It still failed with 5 retries. |
 
 ### `phase2/j_release/` — J release test (Block 4, abandoned method)
 Producer: `useful_tools/j_release_test.py` (on `main` since `fdf0c7a`, last
