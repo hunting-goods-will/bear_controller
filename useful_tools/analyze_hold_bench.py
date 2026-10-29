@@ -30,6 +30,14 @@ THEN (PLAN v4 3.4; guides, not pass lines -- exploratory):
            predicts the temperature after 600 s at 5, 6, 7 A from cold.
            Looks good: 5-7 A stays under 65 C. One-pole model, one sensor:
            a rough guide. Short runs: tau is poorly fixed (reported).
+           With an idle log (--idle-s, Oct 28): if the temperature was flat
+           over its last 60 s (|slope| <= 0.1 C/min), the ambient is FIXED to
+           it and only k and tau are fitted; otherwise the run started while
+           still cooling/warming and the ambient stays free (flagged). A rise
+           under 2 C (eight 0.25 C steps of the winding sensor) is flagged as
+           too small to fit.
+  Overrides --payload-r-m / --payload-angle-deg replace the payload geometry
+           from the header (e.g. r re-measured after the run); printed as such.
   Drift    with --sweep-after: y and f change over the session (Oct 15 gate:
            RMS dy <= 0.06, df <= 0.10 N m).
 
@@ -57,6 +65,10 @@ GOOD_CREEP_NM, GOOD_HUNT_DEG, BAD_HUNT_DEG = 0.1, 0.5, 1.0
 GOOD_PAY, BAD_PAY = 0.15, 0.30
 BAD_SPREAD = 0.3
 TEMP_GOOD = 65.0
+IDLE_FLAT_C_PER_MIN = 0.1
+IDLE_WINDOW_S = 60.0
+MIN_RISE_C = 2.0
+ROOM_C = (15.0, 35.0)              # a fitted ambient outside this (or above the start) is not physical
 
 
 # ---------------------------------------------------------------- reading
@@ -108,10 +120,11 @@ def per_angle(run):
                          creep_angle=math.degrees(run['pos'][use].mean()))
         th = a & (run['phase'] == 'thermal')
         if th.any():
+            amb_w, amb_p = idle_ambient(run, 'w_temp'), idle_ambient(run, 'p_temp')
             d.update(thermal=thermal_fit(run['t'][th] - run['t'][th][0], run['w_temp'][th],
-                                         run['iq'][th]),
+                                         run['iq'][th], amb_w),
                      thermal_p=thermal_fit(run['t'][th] - run['t'][th][0], run['p_temp'][th],
-                                           run['iq'][th]),
+                                           run['iq'][th], amb_p),
                      thermal_u=KT * run['iq'][th].mean())
         out.append(d)
     return out
@@ -128,7 +141,21 @@ def _sim_temp(t, i2, T_start, Ta, k, tau):
     return T
 
 
-def thermal_fit(t, T, iq):
+def idle_ambient(run, col):
+    """From the idle log (if any): (mean over its last IDLE_WINDOW_S, slope C/min,
+    flat?). None without an idle log."""
+    m = run['phase'] == 'idle'
+    if m.sum() < 10:
+        return None
+    t, T = run['t'][m], run[col][m]
+    w = t >= t.max() - IDLE_WINDOW_S
+    if w.sum() < 5:
+        return None
+    slope = float(np.polyfit(t[w], T[w], 1)[0] * 60.0)
+    return dict(Ta=float(np.mean(T[w])), slope=slope, flat=abs(slope) <= IDLE_FLAT_C_PER_MIN)
+
+
+def thermal_fit(t, T, iq, amb=None):
     """Fit Ta (ambient), k (C per A^2 at steady state) and tau to the logged
     temperature, using the measured iq^2 at every sample. Why not a plain
     exponential at the mean current: in a still hold friction lets the
@@ -143,14 +170,27 @@ def thermal_fit(t, T, iq):
     if len(t) < 20 or t[-1] - t[0] < 30:
         res['error'] = 'too short to fit'
         return res
-    f = lambda p: _sim_temp(t, i2, T[0], p[0], p[1], p[2]) - T
+    res['rise_too_small'] = bool(np.ptp(T) < MIN_RISE_C)
+    res['amb'] = amb
     try:
-        sol = least_squares(f, x0=[T[0] - 1.0, 2.0, 200.0],
-                            bounds=([T[0] - 15, 0.0, 10.0], [T[0] + 5, 100.0, 20000.0]))
-        Ta, k, tau = sol.x
+        if amb is not None and amb['flat']:
+            Ta = amb['Ta']
+            f = lambda p: _sim_temp(t, i2, T[0], Ta, p[0], p[1]) - T
+            sol = least_squares(f, x0=[2.0, 200.0], bounds=([0.0, 10.0], [100.0, 20000.0]))
+            k, tau = sol.x
+            res['ambient_from'] = 'idle log (fixed)'
+        else:
+            f = lambda p: _sim_temp(t, i2, T[0], p[0], p[1], p[2]) - T
+            sol = least_squares(f, x0=[T[0] - 1.0, 2.0, 200.0],
+                                bounds=([T[0] - 15, 0.0, 10.0], [T[0] + 5, 100.0, 20000.0]))
+            Ta, k, tau = sol.x
+            res['ambient_from'] = ('fitted (idle log NOT flat: started while still '
+                                   f"changing {amb['slope']:+.2f} C/min)" if amb is not None
+                                   else 'fitted (no idle log)')
         rms = float(np.sqrt(np.mean(sol.fun ** 2)))
         res.update(Ta=float(Ta), k=float(k), tau=float(tau), fit_rms=rms,
-                   dT=float(k * np.mean(i2)), tau_well_fixed=bool(t[-1] - t[0] >= 0.5 * tau))
+                   dT=float(k * np.mean(i2)), tau_well_fixed=bool(t[-1] - t[0] >= 0.5 * tau),
+                   ambient_implausible=bool(not ROOM_C[0] <= Ta <= ROOM_C[1] or Ta > T[0] + 0.5))
     except Exception as e:                                 # noqa: BLE001
         res['error'] = str(e)
     return res
@@ -171,12 +211,12 @@ def data_check(run):
     bad = int(np.sum(run['err'] != 0x80))
     L.append(f"  error bytes != 0x80: {bad}")
     ok &= bad == 0
-    dt = run['loop_dt'][run['phase'] != 'thermal']
+    dt = run['loop_dt'][(run['phase'] != 'thermal') & (run['phase'] != 'idle')]
     if len(dt):
         L.append(f"  loop dt: median {np.median(dt) * 1000:.2f} ms, > 2.5 ms {100 * np.mean(dt > 0.0025):.2f} %, "
                  f"max {dt.max() * 1000:.2f} ms")
         ok &= np.median(dt) < 0.0025
-    trk = np.abs(run['iq'] - run['iq_sent'])
+    trk = np.abs(run['iq'] - run['iq_sent'])[run['phase'] != 'idle']
     L.append(f"  current tracking |iq - iq_sent|: median {np.median(trk):.3f} A, p99 "
              f"{np.percentile(trk, 99):.3f} A")
     ok &= np.median(trk) < 0.1
@@ -189,7 +229,7 @@ def payload_torque(run, deg):
     return run['payload_kg'] * G * run['payload_r_m'] * math.sin(math.radians(vest))
 
 
-def analyse(paths, sweep, sweep_after=None):
+def analyse(paths, sweep, sweep_after=None, r_override=None, angle_override=None):
     L = []
     table = ST.sweep_tables(sweep)
     if sweep_after:
@@ -205,10 +245,22 @@ def analyse(paths, sweep, sweep_after=None):
     else:
         L += [f"Sweep: {sweep}  (no --sweep-after: drift during the session unknown)"]
     runs = [load_run(p) for p in paths]
+    for run in runs:
+        if run['payload_kg'] > 0 and (r_override is not None or angle_override is not None):
+            note = []
+            if r_override is not None:
+                note.append(f"r {run['payload_r_m']} -> {r_override} m")
+                run['payload_r_m'] = r_override
+            if angle_override is not None:
+                note.append(f"hang angle {run['payload_angle_deg']} -> {angle_override} deg")
+                run['payload_angle_deg'] = angle_override
+            run['override_note'] = 'OVERRIDDEN from the command line (header value -> used): ' + ', '.join(note)
     results = []
     for run in runs:
         L += ["", f"=== {os.path.basename(run['path'])}  mode={run['mode']}  payload "
               f"{run['payload_kg']} kg @ {run['payload_r_m']} m, offset {run['payload_angle_deg']} deg"]
+        if run.get('override_note'):
+            L.append(f"  {run['override_note']}")
         if run['sweep'] and os.path.basename(run['sweep']) != os.path.basename(sweep):
             L.append(f"  NOTE: this run's header names a different sweep ({os.path.basename(run['sweep'])})")
         chk, ok = data_check(run)
@@ -243,9 +295,11 @@ def analyse(paths, sweep, sweep_after=None):
                 for name, x in (('winding', th), ('powerstage', tp)):
                     if 'k' in x:
                         pr = predict_temp(x, PREDICT_A)
-                        L.append(f"    {name}: fit ambient {x['Ta']:.1f} C, k {x['k']:.2f} C/A^2, tau {x['tau']:.0f} s, "
-                                 f"fit RMS {x['fit_rms']:.2f} C"
+                        L.append(f"    {name}: ambient {x['Ta']:.1f} C [{x['ambient_from']}], k {x['k']:.2f} C/A^2, "
+                                 f"tau {x['tau']:.0f} s, fit RMS {x['fit_rms']:.2f} C"
                                  f"{'' if x['tau_well_fixed'] else ' (run shorter than tau/2: tau poorly fixed)'}"
+                                 f"{' (RISE < 2 C: too small to fit; numbers unreliable)' if x['rise_too_small'] else ''}"
+                                 f"{' (AMBIENT NOT PHYSICAL: the model does not fit this run; ignore the prediction)' if x['ambient_implausible'] else ''}"
                                  f" -> after {PREDICT_S:.0f} s from cold: "
                                  + ', '.join(f"{A:.0f} A {T:.0f} C" for A, T in pr.items())
                                  + f"  [{'all under' if max(pr.values()) < TEMP_GOOD else 'NOT all under'} "
@@ -334,7 +388,9 @@ def selftest():
             ('bare', {}, []),
             ('payload', dict(payload=pay), ['--payload-kg', '0.711', '--payload-r-m', '0.1651',
                                             '--payload-angle-deg', '10']),
-            ('thermal', {}, ['--thermal', '--thermal-s', '300'])):
+            ('thermal', {}, ['--thermal', '--thermal-s', '300', '--idle-s', '90']),
+            ('payload_wrong_r', dict(payload=pay), ['--payload-kg', '0.711', '--payload-r-m', '0.12',
+                                                    '--payload-angle-deg', '10'])):
         clock = T.Clock()
         fake = T.FakeBear(clock, **kw)
         res = T.invoke(fake, ['--sweep', sw] + argv, clock)
@@ -344,6 +400,8 @@ def selftest():
         files[name] = p
     L, results, _ = analyse([files['bare'], files['payload'], files['thermal']], sw)
     print('\n'.join(L))
+    Lw, resw, _ = analyse([files['bare'], files['payload_wrong_r']], sw)
+    Lo, reso, _ = analyse([files['bare'], files['payload_wrong_r']], sw, r_override=0.1651)
     checks = []
 
     def check(name, ok, detail=''):
@@ -366,6 +424,21 @@ def selftest():
           f"k {th.get('k', float('nan')):.2f}")
     check("thermal: tau within 35 % of the fake's 120 s", 'tau' in th and abs(th['tau'] - 120) < 42,
           f"tau {th.get('tau', float('nan')):.0f} s")
+    check("thermal: ambient fixed from the flat idle log (fake ambient 30 C)",
+          th.get('ambient_from', '').startswith('idle') and abs(th.get('Ta', 0) - 30.0) < 0.2,
+          f"{th.get('ambient_from')}, Ta {th.get('Ta', float('nan')):.2f}")
+    h2w = [l for l in Lw if l.strip().startswith('H2')]
+    h2o = [l for l in Lo if l.strip().startswith('H2')]
+    check("payload run logged with the wrong r (0.12): H2 says rethink",
+          bool(h2w) and all('rethink' in l for l in h2w), h2w[0].strip()[:70] if h2w else 'none')
+    check("...with --payload-r-m 0.1651 (the true r): looks good, and the override is printed",
+          bool(h2o) and all('looks good' in l for l in h2o) and any('OVERRIDDEN' in l for l in Lo),
+          h2o[0].strip()[:70] if h2o else 'none')
+    tt = np.arange(0, 300.0, 1.0)
+    small = thermal_fit(tt, 25.0 + 0.25 * np.floor(tt / 60.0), np.full(len(tt), 1.9))
+    check("a rise under 2 C is flagged too small to fit", small.get('rise_too_small') is True)
+    check("the clean fake thermal fit is NOT flagged (ambient plausible)",
+          th.get('ambient_implausible') is False and th.get('rise_too_small') is False)
     check("summary has H1 and H2 lines", any(l.strip().startswith('H1') for l in L)
           and any(l.strip().startswith('H2') for l in L))
     # a stuck creep must be flagged as not trusted
@@ -398,12 +471,14 @@ def main(argv=None):
     ap.add_argument('--out')
     ap.add_argument('--plot')
     ap.add_argument('--selftest', action='store_true')
+    ap.add_argument('--payload-r-m', type=float, help='override the payload r of payload runs')
+    ap.add_argument('--payload-angle-deg', type=float, help='override the hang angle of payload runs')
     a = ap.parse_args(argv)
     if a.selftest:
         sys.exit(0 if selftest() else 1)
     if not a.logs or not a.sweep:
         ap.error('give hold logs and --sweep (or --selftest)')
-    L, results, _ = analyse(a.logs, a.sweep, a.sweep_after)
+    L, results, _ = analyse(a.logs, a.sweep, a.sweep_after, a.payload_r_m, a.payload_angle_deg)
     text = '\n'.join(L)
     print(text)
     if a.out:

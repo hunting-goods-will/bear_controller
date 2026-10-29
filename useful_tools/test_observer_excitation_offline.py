@@ -481,6 +481,12 @@ def section1():
         'run cap (v 0.02 -> >120 s)': H0_ARGS[:6] + ['0.02'] + H0_ARGS[7:],
         '--freq-hz with sweep': H0_ARGS + ['--freq-hz', '1'],
         '--j-sine with sweep': H0_ARGS + ['--j-sine'],
+        '--i-max 11 (above the 10 A ceiling)': H0_ARGS + ['--i-max', '11'],
+        '--i-max 5 (below 5.5)': H0_ARGS + ['--i-max', '5'],
+        '--bottom-deg 25': H0_ARGS + ['--bottom-deg', '25'],
+        '--bottom-deg 61': H0_ARGS + ['--bottom-deg', '61'],
+        '--bottom-deg with sine': ['--mode', 'sine', '--freq-hz', '0.3', '--arm-mass-kg', '0',
+                                   '--arm-com-m', '0', '--bottom-deg', '45'],
     }
     for name, argv in bad.items():
         r = invoke(argv)
@@ -758,6 +764,73 @@ def section4():
         os.remove(r['csv'])
 
 
+def section4b():
+    print("4b. --i-max 7 and --bottom-deg 45 (Oct 28: stronger spring settings)")
+    args7 = H0_ARGS + ['--i-max', '7']
+    clock = Clock()
+    fake = PosFake(clock)
+    r = invoke(args7, fake, clock)
+    WRITE_LOG['4b. sweep --i-max 7'] = compress(fake.writes, fake.calls)
+    w = fake.writes
+    vals = {n: v for _, n, v in w[:17]}
+    check("--i-max 7: completes; limit_i_max 7 written with the settings and read back",
+          r['rc'] == 0 and vals.get('limit_i_max') == 7.0, f"rc {r['rc']}")
+    check("--i-max 7: last write restores limit_i_max 5.5, after the confirmed disable",
+          w[-1][1:] == ('limit_i_max', 5.5) and w[-2][1:] == ('torque_enable', 0)
+          and fake.regs['limit_i_max'] == 5.5 and fake.te == 0, compress(w[-3:]))
+    if r['csv']:
+        hdr = open(r['csv']).read()
+        check("--i-max 7: header records i_max=7 and the restore", 'i_max=7' in hdr
+              and 'limit_i_max restored to 5.5' in hdr)
+        os.remove(r['csv'])
+    for name, spike, want_rc, want in (
+            ('5.2 A x3 (over the OLD abort): no abort', (15.0, 3, -5.2), 0, 'complete'),
+            ('6.6 A x3: sustained abort at 6.5', (15.0, 3, -6.6), 1, '> 6.5 A for 3'),
+            ('6.9 A once: trip at 6.8', (15.0, 1, -6.9), 1, '> 6.8 A')):
+        clock = Clock()
+        fake = PosFake(clock)
+        fake.spike = spike
+        r = invoke(args7, fake, clock)
+        end = csv_end(r['csv']) if r['csv'] else ''
+        check(f"--i-max 7, {name}", r['rc'] == want_rc and want in end
+              and fake.regs['limit_i_max'] == 5.5, f"rc {r['rc']}; {end[:90]}")
+        if r['csv']:
+            os.remove(r['csv'])
+    clock = Clock()
+    fake = PosFake(clock)
+    orig = fake._write
+
+    def lose_disable(name, value, _o=orig, _f=fake):
+        if name == 'torque_enable' and value == 0:
+            _f.writes.append((_f.clock.t, name, value))
+            return
+        _o(name, value)
+    fake._write = lose_disable
+    fake.spike = (15.0, 3, -6.6)
+    r = invoke(args7, fake, clock)
+    lim = [v for _, n, v in fake.writes if n == 'limit_i_max']
+    out_ok = 'left at 7' in r['out']
+    check("--i-max 7, disable NOT confirmed: limit not restored (no write after), says so",
+          lim == [7.0] and out_ok, f"limit writes {lim}")
+    if r['csv']:
+        os.remove(r['csv'])
+    clock = Clock()
+    fake = PosFake(clock)
+    r = invoke(H0_ARGS + ['--bottom-deg', '45'], fake, clock)
+    WRITE_LOG['4b. sweep --bottom-deg 45'] = compress(fake.writes, fake.calls)
+    ok = r['rc'] == 0 and r['csv'] is not None
+    detail = f"rc {r['rc']}"
+    if ok:
+        seen, rows = phases(r['csv'])
+        lo = min(math.degrees(float(x['pos'])) for x in rows if x['phase'] in ('down', 'dwell'))
+        tab = sweep_tables(r['csv'])
+        ok = 44.5 < lo < 47.0 and tab[0, 0] >= 45 + PHI_DEG - 3 and len(tab) >= 8
+        detail = f"bottom {lo:.2f} deg, first bin vest {tab[0, 0]:.0f}, {len(tab)} bins"
+        os.remove(r['csv'])
+    check("--bottom-deg 45: sweep turns at ~45 deg and still parses", ok, detail)
+    ends_disabled(fake, "bottom 45")
+
+
 def section5():
     print("5. Runtime aborts: each parks or releases, then disables")
     cases = [
@@ -886,7 +959,7 @@ def section5():
 
 def main():
     import traceback
-    for sec in (section1, section2, section3, section4, section5):
+    for sec in (section1, section2, section3, section4, section4b, section5):
         try:
             sec()
         except Exception:

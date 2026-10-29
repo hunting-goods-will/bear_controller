@@ -12,7 +12,7 @@ design. Each 2 ms cycle: error e = target - angle;
 
     u = KP*e + integral(KI*e) - KD*velocity  (+ creep friction feedforward)   (N m, + = up)
 
-then capped at 4.8 A, rate-limited to 4 N m/s, joint-limit and thermal
+then capped at 4.8 A (default; --i-max raises it), rate-limited to 4 N m/s, joint-limit and thermal
 derates, and sent as goal_iq = u/KT in ONE bulk packet (exchange()).
 hold_law() is the only control-law code here and is deliberately small: the
 real hold (controller v2) is Sam's to write; this is a bench instrument.
@@ -37,44 +37,57 @@ hold here needs DOWNWARD (negative) torque; the worn version is upward-only.
 
   --payload-kg/--payload-r-m/--payload-angle-deg   H2 (header + the current check)
   --thermal                                        H3: one still hold at
-      --thermal-deg (60) for --thermal-s (<= 600) s; ends early, normally, at
+      --thermal-deg (60) for --thermal-s (<= 1800) s; ends early, normally, at
       TEMP_WARN (65 C). Rows logged at 50 Hz during that hold.
+  --idle-s N      before arming (after GO), log temperatures and state for N s
+                  with NO writes (5 Hz rows, phase 'idle'): the thermal fit's
+                  starting state and ambient. Use with --thermal from cold.
+  --i-max A       per-run firmware current limit, 5.5 (default, nothing written)
+                  to IQ_CEILING (10 A). Written while disabled and read back
+                  (BearInterface.set_current_limit), restored to 5.5 after a
+                  confirmed disable. Command cap = A - 0.7, abort = A - 0.5 for 3
+                  cycles, prediction limit = A - 0.7 (defaults 4.8 / 5.0 / 4.8).
 
 REFUSES BEFORE OPENING THE PORT: bad arguments; a payload that would FALL when
 released (spring - rig gravity - payload gravity < +0.2 N m anywhere from 25 to
 118 deg; outside the sweep's range the nearest bin is held); hold angles outside 35-95 deg
 or outside the sweep's measured range; the sweep not a bare
 observer_excitation.py sweep; any hold predicted (from the sweep, with and
-without the payload) to need more than 4.8 A including friction; planned run
-> 120 s (non-thermal); not at RT priority.
+without the payload) to need more than the command cap (4.8 A by default)
+including friction; planned run > 120 s (non-thermal); not at RT priority.
 REFUSES BEFORE ENABLING: actuator enabled or faulted; limit_i_max > 5.5;
 arm not resting at >= 110 deg; max(winding, powerstage) >= 65 C;
 SAFETY_CHECKS_CONFIRMED not True; anything but GO typed at the prompt.
 
 ABORTS (-> disable() at once; the spring then snaps the arm up into the top
 stop -- from 40 deg that is 76 deg of travel, more than the Oct 15 releases):
-failed exchange; any error bit or a watchdog trip; |iq| >= 5.0 A for 3 cycles;
+failed exchange; any error bit or a watchdog trip; |iq| >= 5.0 A (default;
+--i-max - 0.5) for 3 cycles;
 speed > 2 rad/s for 3 cycles in a row, judged from the POSITION (one velocity-
 register glitch doesn't abort; the D term uses the position-derived speed when
 the register disagrees by > 1 rad/s);
 |target - angle| > 5 deg (not during the fade); angle < 25 deg; loop gap
 > 10 ms; max temperature >= 75 C; time cap; Ctrl-C.
 
-EVERY WRITE (nothing else is written; no gains, no limits, no save_config):
+EVERY WRITE (nothing else is written; no gains, no save_config):
+  (--idle-s: none -- reads only until the idle log ends)
   1. watchdog_timeout = 10000 us, read back          (configure_watchdog)
-  2. goal_iq = 0, mode = 0, torque_enable = 1, each read back   (enable)
+  1b. only with --i-max above 5.5: limit_i_max = A, read back (set_current_limit)
+  2. mode = 0, goal_iq = 0, torque_enable = 1, each read back   (enable; mode
+     first since Oct 28 -- goal_iq can't be written in mode 2)
   3. goal_iq every cycle, inside the one bulk packet  (exchange)
   4. on exit: goal_iq = 0, torque_enable = 0, confirmed, <= 3 tries (disable);
-     then watchdog_timeout = 0, read back -- ONLY if the disable was confirmed.
-     Unconfirmed: the watchdog is left armed (it trips in ~10 ms) and the script
-     says to cut power.
+     then watchdog_timeout = 0, read back, and (if 1b) limit_i_max = 5.5, read
+     back -- ONLY if the disable was confirmed. Unconfirmed: the watchdog is
+     left armed (it trips in ~10 ms), the limit is left as it is (RAM only; a
+     power cycle restores 5.5), and the script says to cut power.
 Read only, into the header: limit_i_max, iq current-loop gains.
 
 RUN (from the repo root, after test_connection.py and the H0 sweep):
   sudo chrt -f 80 taskset -c 3 ~/projects/bear_controller/venv/bin/python3 \\
       useful_tools/hold_bench_test.py --sweep <H0 sweep csv>
   ... --payload-kg 0.711 --payload-r-m <r> --payload-angle-deg <hang angle>
-  ... --thermal
+  ... --thermal --idle-s 300 [--i-max 7]
 Offline (fake actuator, no port): useful_tools/test_hold_bench_offline.py
 
 Output: logs/phase2/hold_bench/hold_bench_<YYYYmmdd_HHMMSS>.csv (or
@@ -94,7 +107,7 @@ import time
 import numpy as np
 
 from main_controller.bear_interface import BearInterface
-from main_controller.config import (LOG_DIR, TEMP_WARN, TEMP_MAX,
+from main_controller.config import (LOG_DIR, TEMP_WARN, TEMP_MAX, IQ_CEILING,
                                     WATCHDOG_TIMEOUT_MS, SAFETY_CHECKS_CONFIRMED)
 from main_controller.controller import KT, PHI_DEG
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # sweep_tables.py sits here
@@ -107,8 +120,10 @@ LOG_SUBDIR = os.path.join(LOG_DIR, 'phase2', 'hold_bench')
 KP_DEFAULT, KI_DEFAULT, KD_DEFAULT = 40.0, 60.0, 1.5   # N m/rad, N m/(rad s), N m s/rad
 KP_RANGE, KI_RANGE, KD_RANGE = (5.0, 100.0), (0.0, 200.0), (0.0, 5.0)
 RATE_NM_S = 4.0                    # torque rate limit (Phase 1 value; flange history)
-IQ_CMD_MAX_A = 4.8                 # command cap, below the 5.0 A abort
-U_LIMIT_NM = IQ_CMD_MAX_A * KT     # 3.216 N m
+I_MAX_DEFAULT = 5.5                # firmware limit_i_max as flashed (config.MAX_IQ)
+CAP_BELOW_A, ABORT_BELOW_A = 0.7, 0.5   # cap = limit - 0.7, abort = limit - 0.5
+IQ_CMD_MAX_A = I_MAX_DEFAULT - CAP_BELOW_A   # 4.8 A: default command cap, below the 5.0 A abort
+U_LIMIT_NM = IQ_CMD_MAX_A * KT     # 3.216 N m (default)
 
 # ---- Plan ---------------------------------------------------------------------
 DEFAULT_ANGLES = (80.0, 60.0, 40.0)   # actuator deg
@@ -134,16 +149,18 @@ END_DEG = 118.0                    # final target, ~1.5 deg ABOVE the top stop
                                    # the spring fling the fake arm into the stop at
                                    # ~2 rad/s.) Error at the stop <= 3 deg < abort.
 THERMAL_DEG, THERMAL_S = 60.0, 600.0
-THERMAL_S_RANGE = (10.0, 600.0)
+THERMAL_S_RANGE = (10.0, 1800.0)
+IDLE_S_RANGE = (0.0, 1800.0)
+IDLE_PERIOD_S = 0.2                # 5 Hz rows during the idle log
 THERMAL_LOG_EVERY = 10             # 50 Hz rows during the thermal hold
 
 # ---- Checks -------------------------------------------------------------------
 REST_MIN_DEG = 110.0               # start on the top stop
-PREDICT_MAX_A = 4.8                # refuse a hold predicted to need more
+PREDICT_MAX_A = IQ_CMD_MAX_A       # default; per run = the command cap
 PREDICT_MARGIN_A = 0.3
 RUN_CAP_S = 120.0
 THERMAL_EXTRA_S = 60.0             # cap = thermal-s + this
-IQ_ABORT_A, IQ_ABORT_COUNT = 5.0, 3
+IQ_ABORT_A, IQ_ABORT_COUNT = I_MAX_DEFAULT - ABORT_BELOW_A, 3   # 5.0 A default
 V_ABORT = 2.0                      # rad/s, judged on the POSITION-derived speed...
 V_ABORT_COUNT = 3                  # ...for this many cycles in a row. A single velocity-
                                    # register glitch (Aug: +7 and -9.9 rad/s wrong-sign
@@ -170,7 +187,7 @@ MAX_LOOP_DT_S = 0.010              # = watchdog timeout
 PERIOD_S = 0.002                   # 500 Hz
 G = 9.81
 
-PHASES = ('ramp', 'settle', 'still', 'creep', 'fade', 'thermal')
+PHASES = ('ramp', 'settle', 'still', 'creep', 'fade', 'thermal', 'idle')
 COLUMNS = ['t', 'loop_dt', 'phase', 'angle_idx', 'target_deg', 'sp', 'pos', 'vel',
            'iq', 'iq_sent', 'u_des', 'u_cmd', 'integ', 'w_temp', 'p_temp', 'err']
 
@@ -179,11 +196,11 @@ class Abort(Exception):
     """A runtime check tripped -> disable at once."""
 
 
-def hold_law(e, v, integ, dt, kp, ki, kd):
+def hold_law(e, v, integ, dt, kp, ki, kd, u_limit=U_LIMIT_NM):
     """PID on position, derivative on the MEASURED velocity (no kick when the
     target moves). Returns (u in N m, new integral). Pure: no bus, no state."""
     integ = integ + ki * e * dt
-    integ = max(-U_LIMIT_NM, min(U_LIMIT_NM, integ))
+    integ = max(-u_limit, min(u_limit, integ))
     return kp * e + integ - kd * v, integ
 
 
@@ -251,7 +268,7 @@ def build_plan(start_rad, a):
         here = tgt
     T, fn = move_profile(here, math.radians(END_DEG))
     segs.append(('ramp', -1, END_DEG, T, fn))
-    segs.append(('fade', -1, END_DEG, U_LIMIT_NM / RATE_NM_S + 0.2,
+    segs.append(('fade', -1, END_DEG, getattr(a, 'u_limit', U_LIMIT_NM) / RATE_NM_S + 0.2,
                  (lambda tau, x=math.radians(END_DEG): x)))
     return segs
 
@@ -267,7 +284,8 @@ def payload_torque(a, act_deg):
 
 def predictions(table, a):
     """Per hold angle: y, f, predicted u (bare, and with payload), peak |iq|.
-    Refuses (ValueError) outside the sweep's range or above PREDICT_MAX_A."""
+    Refuses (ValueError) outside the sweep's range or above the run's command cap."""
+    pmax = getattr(a, 'predict_max', PREDICT_MAX_A)
     out = []
     for deg in ([a.thermal_deg] if a.thermal else a.angles):
         vest = deg + PHI_DEG
@@ -279,10 +297,11 @@ def predictions(table, a):
         u_bare = -y
         u_pay = -y + payload_torque(a, deg)
         peak = (max(abs(u_bare), abs(u_pay)) + f) / KT + PREDICT_MARGIN_A
-        if peak > PREDICT_MAX_A:
+        if peak > pmax:
             raise ValueError(f"hold {deg:g} deg predicted to need ~{peak:.2f} A "
                              f"(|u| {max(abs(u_bare), abs(u_pay)):.2f} + friction {f:.2f} N m, "
-                             f"+{PREDICT_MARGIN_A} A margin) > {PREDICT_MAX_A} A")
+                             f"+{PREDICT_MARGIN_A} A margin) > {pmax:g} A"
+                             + ("" if pmax > IQ_CMD_MAX_A else " (--i-max raises it)"))
         out.append(dict(deg=deg, vest=vest, y=y, f=f, u_bare=u_bare, u_pay=u_pay, peak=peak))
     return out
 
@@ -325,6 +344,11 @@ def parse_args(argv):
     ap.add_argument('--thermal', action='store_true')
     ap.add_argument('--thermal-deg', type=float, default=THERMAL_DEG)
     ap.add_argument('--thermal-s', type=float, default=THERMAL_S)
+    ap.add_argument('--idle-s', type=float, default=0.0,
+                    help='log state for this long before arming, no writes (cold-start baseline)')
+    ap.add_argument('--i-max', type=float, default=I_MAX_DEFAULT,
+                    help=f'per-run firmware current limit, {I_MAX_DEFAULT}-{IQ_CEILING} A '
+                         f'(cap = A - {CAP_BELOW_A}, abort = A - {ABORT_BELOW_A})')
     ap.add_argument('--kp', type=float, default=KP_DEFAULT)
     ap.add_argument('--ki', type=float, default=KI_DEFAULT)
     ap.add_argument('--kd', type=float, default=KD_DEFAULT)
@@ -354,6 +378,15 @@ def parse_args(argv):
         ap.error('--payload-angle-deg must be -90..90')
     if not THERMAL_S_RANGE[0] <= a.thermal_s <= THERMAL_S_RANGE[1]:
         ap.error(f'--thermal-s must be {THERMAL_S_RANGE[0]:g}-{THERMAL_S_RANGE[1]:g}')
+    if not IDLE_S_RANGE[0] <= a.idle_s <= IDLE_S_RANGE[1]:
+        ap.error(f'--idle-s must be {IDLE_S_RANGE[0]:g}-{IDLE_S_RANGE[1]:g}')
+    if not I_MAX_DEFAULT <= a.i_max <= IQ_CEILING:          # NaN fails too
+        ap.error(f'--i-max must be {I_MAX_DEFAULT}-{IQ_CEILING} A (config.IQ_CEILING)')
+    a.raised = a.i_max > I_MAX_DEFAULT
+    a.iq_cmd_max = a.i_max - CAP_BELOW_A
+    a.iq_abort = a.i_max - ABORT_BELOW_A
+    a.u_limit = a.iq_cmd_max * KT
+    a.predict_max = a.iq_cmd_max
     for name, rng in (('kp', KP_RANGE), ('ki', KI_RANGE), ('kd', KD_RANGE)):
         if not rng[0] <= getattr(a, name) <= rng[1]:
             ap.error(f'--{name} must be {rng[0]:g}-{rng[1]:g}')
@@ -397,12 +430,14 @@ class Run:
         if a.thermal:
             n = int((a.cap_s - a.thermal_s) / PERIOD_S + a.thermal_s / PERIOD_S
                     / THERMAL_LOG_EVERY) + 2000
+        n += int(a.idle_s / IDLE_PERIOD_S) + 10
         self.buf = np.full((n, len(COLUMNS)), np.nan)
         self.n = 0
         self.header, self.footer = [], []
         self.end_reason = 'not started'
         self.t_enable = None
         self.armed = False                 # True once configure_watchdog is called
+        self.limit_written = False         # True once a raised limit_i_max write was sent
 
     def log(self, row):
         if self.n < len(self.buf):
@@ -445,7 +480,9 @@ class Run:
             f"payload_kg={a.payload_kg} payload_r_m={a.payload_r_m} "
             f"payload_angle_deg={a.payload_angle_deg}",
             f"gains kp={a.kp} ki={a.ki} kd={a.kd}  rate={RATE_NM_S} N m/s  "
-            f"cmd cap {IQ_CMD_MAX_A} A  KT={KT}",
+            f"cmd cap {a.iq_cmd_max:g} A  KT={KT}",
+            f"i_max={a.i_max:g} ({'raised for this run; restored to ' + str(I_MAX_DEFAULT) + ' after a confirmed disable' if a.raised else 'default, not written'}) "
+            f"abort {a.iq_abort:g} A x{IQ_ABORT_COUNT}  idle_s={a.idle_s:g}",
             f"sweep={os.path.abspath(a.sweep)}",
             f"readback: limit_i_max={lim} p_gain_iq={kpi} i_gain_iq={kii}",
             f"start: pos {math.degrees(pos):.2f} deg vel {vel:.3f} iq {iq:.3f} "
@@ -464,11 +501,55 @@ class Run:
         for line in self.header:
             print(line)
 
+    # -- idle log (reads only, before arming) -------------------------------------
+    def idle(self):
+        """Log state at 5 Hz for --idle-s seconds with NO writes, so a thermal
+        fit knows the starting state (cold, or still cooling from a sweep).
+        Stops (no writes) on an error byte, heat, or the arm leaving the stop."""
+        a, bear, i = self.a, self.iface.bear, self.iface.id
+        if a.idle_s <= 0:
+            return
+        print(f"Idle log {a.idle_s:.0f} s (no writes; Ctrl-C stops with nothing written)...")
+        t_start = time.monotonic()
+        nxt = t_start
+        first = last = None
+        while time.monotonic() - t_start < a.idle_s:
+            values, err = bear.bulk_read([i], self.iface.LOOP_READ_REGS)[0]
+            now = time.monotonic()
+            if err is None or any(v is None for v in values):
+                raise Abort("idle log: read failed")
+            pos, vel, iq, tw, tp = values
+            self.log([now - self.t0, IDLE_PERIOD_S, PHASES.index('idle'), -2, float('nan'),
+                      float('nan'), pos, vel, iq, float('nan'), float('nan'), float('nan'),
+                      float('nan'), tw, tp, err])
+            first = first or (now, tw, tp)
+            last = (now, tw, tp)
+            if err != 0x80:
+                raise Abort(f"idle log: error byte {hex(err)}")
+            if max(tw, tp) >= TEMP_WARN:
+                raise Abort(f"idle log: temperature {max(tw, tp):.1f} C >= {TEMP_WARN} C")
+            if math.degrees(pos) < REST_MIN_DEG:
+                raise Abort(f"idle log: arm left the top stop ({math.degrees(pos):.1f} deg)")
+            nxt += IDLE_PERIOD_S
+            s = nxt - time.monotonic()
+            if s > 0:
+                time.sleep(s)
+        if first and last:
+            mins = max((last[0] - first[0]) / 60.0, 1e-9)
+            self.header.append(f"idle {a.idle_s:.0f} s: winding {first[1]:.2f} -> {last[1]:.2f} C, "
+                               f"powerstage {first[2]:.2f} -> {last[2]:.2f} C "
+                               f"({(last[1] - first[1]) / mins:+.2f} / {(last[2] - first[2]) / mins:+.2f} C/min)")
+            print(self.header[-1])
+
     # -- the loop ----------------------------------------------------------------
     def run(self):
         a, iface = self.a, self.iface
         self.armed = True                  # from here on, exit must disable + disarm
         wd = iface.configure_watchdog(WATCHDOG_TIMEOUT_MS)
+        if a.raised:
+            self.limit_written = True      # from here on, a confirmed exit restores it
+            rb = iface.set_current_limit(a.i_max)
+            self.header.append(f"limit_i_max raised to {rb} A for this run")
         iface.enable()
         self.header.append(f"watchdog {wd} us; enabled")
         self.t_enable = time.monotonic()
@@ -514,10 +595,10 @@ class Run:
             if phase == 'fade':
                 u_des = 0.0
             else:
-                u_des, integ_new = hold_law(e, vel, integ, dtc, a.kp, a.ki, a.kd)
+                u_des, integ_new = hold_law(e, vel, integ, dtc, a.kp, a.ki, a.kd, a.u_limit)
                 if phase == 'creep' and a.creep_ff > 0:
                     u_des += creep_ff(now - seg_t0, a, a.pred[aidx]['f'])
-            u_des = max(-U_LIMIT_NM, min(U_LIMIT_NM, u_des))
+            u_des = max(-a.u_limit, min(a.u_limit, u_des))
             step = RATE_NM_S * dtc
             u_new = max(u_cmd - step, min(u_cmd + step, u_des))
             if phase != 'fade':
@@ -530,7 +611,7 @@ class Run:
             iq_cmd = u_cmd / KT
             iq_cmd = iface.joint_limit_scale(iq_cmd, state)
             iq_cmd = iface.thermal_scale(iq_cmd, state)
-            iq_cmd = max(-IQ_CMD_MAX_A, min(IQ_CMD_MAX_A, iq_cmd))
+            iq_cmd = max(-a.iq_cmd_max, min(a.iq_cmd_max, iq_cmd))
 
             state, err = iface.exchange(iq_cmd)
             t_now = time.monotonic()
@@ -549,9 +630,9 @@ class Run:
                 raise Abort(f"watchdog tripped (error {hex(err)})")
             if iface.has_error(err):
                 raise Abort(f"error byte {hex(err)}")
-            over = over + 1 if abs(state['iq']) >= IQ_ABORT_A else 0
+            over = over + 1 if abs(state['iq']) >= a.iq_abort else 0
             if over >= IQ_ABORT_COUNT:
-                raise Abort(f"|iq| >= {IQ_ABORT_A} A for {IQ_ABORT_COUNT} cycles "
+                raise Abort(f"|iq| >= {a.iq_abort:g} A for {IQ_ABORT_COUNT} cycles "
                             f"({state['iq']:.2f} A)")
             over_v = over_v + 1 if abs(v_pos) > V_ABORT else 0
             if over_v >= V_ABORT_COUNT:
@@ -664,6 +745,7 @@ def main(argv=None):
             print("Not started.")
             return 1
         started = True
+        run.idle()
         run.run()
     except Abort as e:
         run.end_reason = f"ABORT: {e}"
@@ -683,13 +765,24 @@ def main(argv=None):
                     (wd,), _ = iface.bear.get_watchdog_timeout(iface.id)[0]
                     run.footer.append(f"disable confirmed attempts={iface.last_disable_attempts} "
                                       f"ms={iface.last_disable_ms}; watchdog reset to {wd} us")
+                    if run.limit_written:
+                        try:
+                            rb = iface.set_current_limit(I_MAX_DEFAULT)
+                            run.footer.append(f"limit_i_max restored to {rb} A")
+                        except Exception as e:             # noqa: BLE001
+                            msg = (f"limit_i_max NOT restored ({e}); power-cycle the actuator "
+                                   f"(flash holds {I_MAX_DEFAULT} A) before any other script")
+                            print(f"\n{msg}")
+                            run.footer.append(msg)
                 else:
                     # Disable NOT confirmed: leave the watchdog ARMED. With no more traffic it
                     # trips within ~10 ms and the drive goes to damping (bench T2/T4). Resetting
                     # it here would remove the only backstop if torque_enable = 0 was lost
                     # (the Oct 13 failure mode). Claude Code review, Oct 27.
                     msg = ("DISABLE NOT CONFIRMED -- watchdog LEFT ARMED (trips in ~10 ms with no "
-                           "traffic). CUT ACTUATOR POWER and check it before anything else.")
+                           "traffic). CUT ACTUATOR POWER and check it before anything else."
+                           + (f" limit_i_max left at {run.a.i_max:g} A (RAM; power cycle restores "
+                              f"{I_MAX_DEFAULT})." if run.limit_written else ""))
                     print(f"\n{msg}")
                     run.footer.append(msg)
         finally:

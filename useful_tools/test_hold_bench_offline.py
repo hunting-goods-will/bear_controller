@@ -136,6 +136,7 @@ class FakeBear:
         self.regs = {'mode': 0, 'goal_iq': 0.0, 'watchdog_timeout': 0,
                      'limit_i_max': 5.5, 'p_gain_iq': 0.02, 'i_gain_iq': 0.02}
         self.writes = []           # (t, name, value, via)
+        self.ignored_goal = 0      # goal_iq writes above limit_i_max (ignored by firmware)
         self.events = []           # (t, kind)
         self.max_fric_override = None
         # injection hooks
@@ -214,6 +215,9 @@ class FakeBear:
             self.te_change_at = self.clock.t + TE_LAG_S
         elif name == 'goal_iq' and self.regs['mode'] not in (0, 3):
             return             # SDK 1.2.0: goal_iq writable only in modes 0 and 3
+        elif name == 'goal_iq' and abs(value) > self.regs['limit_i_max'] + 1e-9:
+            self.ignored_goal += 1
+            return             # SDK 1.2.0: a goal above limit_i_max is NOT executed
         else:
             self.regs[name] = value
 
@@ -387,10 +391,12 @@ def still_stats(d, k):
     return KT * d['iq'][last].mean(), np.degrees(np.ptp(d['pos'][m]))
 
 
-def common_after_enable(res, label):
+def common_after_enable(res, label, cap=4.8, raised=False):
     """Every armed run must end disabled with the watchdog reset, and write
     nothing outside the declared set."""
     allowed = {'watchdog_timeout', 'goal_iq', 'mode', 'torque_enable'}
+    if raised:
+        allowed.add('limit_i_max')
     names = {w[1] for w in res['writes']}
     check(f"{label}: only declared registers written", names <= allowed, str(sorted(names)))
     w = res['writes']
@@ -401,7 +407,9 @@ def common_after_enable(res, label):
     check(f"{label}: CSV saved with an END line", end_line(res) is not None, end_line(res) or '')
     if res['csv'] and res['csv']['rows']:
         d = rows_np(res)
-        check(f"{label}: |iq command| <= 4.8 A always", np.abs(d['iq_sent']).max() <= 4.8 + 1e-9,
+        keep = d['phase'] != 'idle'
+        d = {k: (v[keep] if isinstance(v, np.ndarray) and len(v) == len(keep) else v) for k, v in d.items()}
+        check(f"{label}: |iq command| <= {cap:g} A always", np.abs(d['iq_sent']).max() <= cap + 1e-9,
               f"max {np.abs(d['iq_sent']).max():.3f}")
         # judged on the logged time stamps (the thermal hold logs every 10th cycle)
         du = np.abs(np.diff(d['u_cmd']))
@@ -424,6 +432,8 @@ def main():
     make_sweep(sweep_strong, spring_scale=2.6)
     sweep_wrench = os.path.join(tmp, 'sweep_wrench.csv')
     make_sweep(sweep_wrench, mass=0.711)
+    sweep_mid = os.path.join(tmp, 'sweep_mid.csv')          # x1.6: 40 deg needs ~6.6 A
+    make_sweep(sweep_mid, spring_scale=1.6)
 
     tab = ST.sweep_tables(sweep)
     print("0. Fake sweep parses; its y matches the fake's physics")
@@ -436,7 +446,11 @@ def main():
             (bare_args(sweep, '--angles', '30'), 'angle below 35'),
             (bare_args(sweep, '--angles', '80,96'), 'angle above 95'),
             (bare_args(sweep, '--creep-deg', '3'), 'creep 3 deg'),
-            (bare_args(sweep, '--thermal', '--thermal-s', '700'), 'thermal 700 s'),
+            (bare_args(sweep, '--thermal', '--thermal-s', '1900'), 'thermal 1900 s'),
+            (bare_args(sweep, '--i-max', '5.0'), '--i-max below 5.5'),
+            (bare_args(sweep, '--i-max', '10.5'), '--i-max above the 10 A ceiling'),
+            (bare_args(sweep, '--i-max', 'nan'), '--i-max NaN'),
+            (bare_args(sweep, '--idle-s', '-1'), '--idle-s negative'),
             (bare_args(sweep, '--payload-kg', '0.711'), 'payload kg without r'),
             (bare_args(sweep, '--kp', '500'), 'kp out of range'),
             (bare_args(sweep, '--release-margin', '0.05'), 'release margin below 0.1'),
@@ -718,6 +732,164 @@ def main():
                 detail = (f"creep err max {max(errs):.3f} N m, amp min {min(amps):.2f} deg"
                           f"{', final ramp ended early (as designed)' if early else ''}")
             check(f"J {J}, weight at {off:+.0f} deg: completes, reads it, creeps", ok, detail)
+
+    print("\n10. Raised current limit (--i-max), strong-spring fake")
+    # spring x1.6: the 40 deg hold needs ~6.6 A -> refused by default, runs at 8 A
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    res = invoke(fake, bare_args(sweep_mid), clock)
+    check("x1.6 spring at the default limit: refused before the port opens (needs > 4.8 A)",
+          'SystemExit' in str(res['rc']) and res['ports'] == 0 and not res['writes'], str(res['rc'])[:80])
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    el = end_line(res) or ''
+    check("--i-max 8 on the strong spring: completes", res['rc'] == 0, el or res['out'][-300:])
+    seq = [(n, v) for _, n, v, via in res['writes'] if not (n == 'goal_iq' and via == 'bulk')]
+    check("write order: watchdog 10000, limit_i_max 8, mode 0, goal_iq 0, torque_enable 1, ..., "
+          "goal_iq 0, torque_enable 0, watchdog 0, limit_i_max 5.5",
+          seq == [('watchdog_timeout', 10000), ('limit_i_max', 8.0), ('mode', 0), ('goal_iq', 0.0),
+                  ('torque_enable', 1), ('goal_iq', 0.0), ('torque_enable', 0),
+                  ('watchdog_timeout', 0), ('limit_i_max', 5.5)], str(seq))
+    check("limit restored: actuator reads 5.5 A after the run", fake.regs['limit_i_max'] == 5.5)
+    check("no command was ever above the limit in force (firmware ignored none)",
+          fake.ignored_goal == 0, f"{fake.ignored_goal} ignored")
+    if res['rc'] == 0:
+        dd = rows_np(res)
+        peak = np.abs(dd['iq']).max()
+        check("the run really used more than the old 4.8 A cap", peak > 4.8, f"peak |iq| {peak:.2f} A")
+        errs = [abs(creep_avg(dd, k)[0] + y_true(deg, 1.6)) for k, deg in enumerate(hb.DEFAULT_ANGLES)]
+        check("creep readings still right at the higher torque (within 0.05 N m)", max(errs) < 0.05,
+              f"max err {max(errs):.3f}")
+        common_after_enable(res, "  [i-max 8]", cap=7.3, raised=True)
+        check("header records the raised limit", any('i_max=8' in l for l in res['csv']['comments']))
+
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    fake.iq_override = lambda x: -7.6 if after(T_ARM)(x) else None
+    res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    el = end_line(res) or ''
+    check("abort scales with the limit: |iq| >= 7.5 A x3 aborts", '7.5 A' in el, el)
+    check("...and the limit is still restored after the confirmed disable",
+          fake.regs['limit_i_max'] == 5.5 and bool(res['writes'])
+          and res['writes'][-1][1:3] == ('limit_i_max', 5.5))
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    fake.iq_override = lambda x: -5.2 if after(T_ARM)(x) and x.clock.t < T_ARM + 0.05 else None
+    res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    check("...and 5.2 A (over the OLD abort) does not abort at --i-max 8", res['rc'] == 0,
+          end_line(res) or '')
+
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    fake.drop_write = lambda n, v: n == 'torque_enable' and v == 0
+    fake.err_override = lambda x: 0x90 if after(T_ARM)(x) else None
+    res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    lw = [w[2] for w in res['writes'] if w[1] == 'limit_i_max']
+    check("unconfirmed disable: limit NOT restored (no writes after it), footer says so",
+          lw == [8.0] and any('left at 8' in l for l in res['csv']['comments']), str(lw))
+
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    fake.drop_write = lambda n, v: n == 'limit_i_max' and v == 8.0
+    res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    el = end_line(res) or ''
+    check("limit write lost -> refused at its read-back, never enabled",
+          'REFUSED/FAILED' in el and not any(w[1] == 'torque_enable' and w[2] == 1 for w in res['writes']),
+          el[:100])
+
+    # the old script's way (no limit write) would have every command above 5.5 A ignored:
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    with mock.patch.object(bi.BearInterface, 'set_current_limit',
+                           lambda self, amps: setattr(self, 'max_iq', amps) or amps):
+        res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    check("(fake check) skipping the firmware limit write -> commands above 5.5 A ignored, run fails",
+          fake.ignored_goal > 0 and res['rc'] != 0, f"{fake.ignored_goal} ignored; "
+          f"{(end_line(res) or '')[:60]}")
+
+    # set_current_limit() directly: refuses while enabled, out of range, NaN; nothing written
+    for setup, amps, exc, why in (
+            (lambda f: setattr(f, 'te_visible', 1), 8.0, RuntimeError, 'while enabled'),
+            (None, 10.5, ValueError, 'above the 10 A ceiling'),
+            (None, float('nan'), ValueError, 'NaN'),
+            (None, 0.0, ValueError, 'zero')):
+        clock = Clock()
+        fake = FakeBear(clock)
+        if setup:
+            setup(fake)
+        iface = bi.BearInterface.__new__(bi.BearInterface)
+        iface.bear, iface.id = fake, 1
+        try:
+            iface.set_current_limit(amps)
+            raised = None
+        except Exception as e:                     # noqa: BLE001
+            raised = e
+        check(f"set_current_limit refuses {why}: {exc.__name__}, limit_i_max not written",
+              isinstance(raised, exc) and not any(w[1] == 'limit_i_max' for w in fake.writes),
+              repr(raised)[:70])
+    clock = Clock()
+    fake = FakeBear(clock)
+    iface = bi.BearInterface.__new__(bi.BearInterface)
+    iface.bear, iface.id = fake, 1
+    rb = iface.set_current_limit(8.0)
+    check("set_current_limit(8) while disabled: written, read back, clamp follows",
+          rb == 8.0 and fake.regs['limit_i_max'] == 8.0 and iface.max_iq == 8.0)
+
+    print("\n11. Idle log (--idle-s): reads only, then the normal run")
+    clock = Clock()
+    fake = FakeBear(clock)
+    res = invoke(fake, bare_args(sweep, '--thermal', '--thermal-s', '30', '--idle-s', '60'), clock)
+    check("thermal with 60 s idle log completes", res['rc'] == 0, end_line(res) or res['out'][-300:])
+    if res['rc'] == 0:
+        dd = rows_np(res)
+        idle = dd['phase'] == 'idle'
+        span = dd['t'][idle].max() - dd['t'][idle].min()
+        hz = idle.sum() / max(span, 1e-9)
+        check("idle rows: ~60 s at ~5 Hz", 58 < span < 61 and 4 < hz < 6, f"{span:.1f} s, {hz:.1f} Hz")
+        first_write = min(w[0] for w in res['writes'])
+        t_idle_end = 1000.0 + dd['t'][idle].max()
+        check("no write of any kind during the idle log", first_write >= t_idle_end - 1e-6,
+              f"first write {first_write - 1000:.2f} s, idle ended {t_idle_end - 1000:.2f} s")
+        check("idle summary in the header", any(l.startswith('# idle 60 s') for l in res['csv']['comments']))
+        common_after_enable(res, "  [idle+thermal]")
+    clock = Clock()
+    fake = FakeBear(clock)
+    calls = []
+
+    def bump(x):                               # someone moves the arm during the idle log
+        calls.append(1)
+        if len(calls) == 20:
+            x.pos = math.radians(100.0)
+    orig = fake.bulk_read
+
+    def br(ids, regs):
+        bump(fake)
+        return orig(ids, regs)
+    fake.bulk_read = br
+    res = invoke(fake, bare_args(sweep, '--thermal', '--thermal-s', '30', '--idle-s', '60'), clock)
+    el = end_line(res) or ''
+    check("arm leaves the stop during idle -> stops with ZERO writes", 'left the top stop' in el
+          and not res['writes'], el[:80])
+    clock = Clock()
+    fake = FakeBear(clock)
+    n_reads = []
+
+    def br2(ids, regs, _o=fake.bulk_read):
+        n_reads.append(1)
+        if len(n_reads) == 30:
+            raise KeyboardInterrupt
+        return _o(ids, regs)
+    fake.bulk_read = br2
+    res = invoke(fake, bare_args(sweep, '--thermal', '--thermal-s', '30', '--idle-s', '60'), clock)
+    check("Ctrl-C during idle -> interrupted, ZERO writes, log saved",
+          'interrupted' in (end_line(res) or '') and not res['writes'], end_line(res) or '')
+    ok_parse = True
+    try:
+        hb.parse_args(['--sweep', sweep, '--thermal', '--thermal-s', '1800'])
+    except SystemExit:
+        ok_parse = False
+    check("--thermal-s 1800 accepted (was 600 max)", ok_parse)
 
     print("\n9. hold_law is pure and bounded")
     u, I = hb.hold_law(0.01, 0.0, 0.0, 0.002, 40, 60, 1.5)

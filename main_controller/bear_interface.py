@@ -19,6 +19,7 @@ class BearInterface:
         self.bear.single_try_num = COMM_TRY_NUM
         self.last_disable_attempts = None   # set by disable()
         self.last_disable_ms = None
+        self.max_iq = MAX_IQ                # software clamp; follows set_current_limit()
 
     def enable(self):
         """Switch on torque mode (Mode 0) safely.
@@ -191,7 +192,8 @@ class BearInterface:
         Returns the actually-applied (clamped) value — always track this,
         not your own running total, or you'll silently diverge from
         what the hardware is really doing once you hit the clamp."""
-        iq = max(-MAX_IQ, min(MAX_IQ, iq))
+        lim = getattr(self, 'max_iq', MAX_IQ)
+        iq = max(-lim, min(lim, iq))
         self.bear.set_goal_iq((self.id, iq))
         return iq
 
@@ -226,10 +228,12 @@ class BearInterface:
         Returns (state, err). On a failed exchange (all retries used, ~6 ms)
         returns (None, None) -- the loop must then stop.
         Every successful call is a write, so it also keeps the watchdog fed.
-        The command is clamped to MAX_IQ (= firmware limit_i_max), so
-        firmware never silently ignores it.
+        The command is clamped to self.max_iq (= the firmware limit_i_max in
+        force: MAX_IQ unless set_current_limit() raised it), so firmware never
+        silently ignores it.
         """
-        iq = max(-MAX_IQ, min(MAX_IQ, iq_command))
+        lim = getattr(self, 'max_iq', MAX_IQ)
+        iq = max(-lim, min(lim, iq_command))
         values, err = self.bear.bulk_read_write(
             [self.id], self.LOOP_READ_REGS, ['goal_iq'], [[iq]])[0]
         if err is None or any(v is None for v in values):
@@ -283,6 +287,31 @@ class BearInterface:
         if eff >= TEMP_MAX:
             return 0.0
         return iq_command * (1.0 - (eff - TEMP_WARN) / (TEMP_MAX - TEMP_WARN))
+
+    def set_current_limit(self, amps):
+        """Set the firmware current limit (limit_i_max) for THIS RUN only, and
+        make the software clamp follow it. Never saved to flash (a power cycle
+        restores MAX_IQ). Only while disabled. Confirmed by read-back.
+
+        Why both together: firmware IGNORES a goal_iq above limit_i_max (SDK
+        1.2.0 §2.2.2), so the software clamp must never exceed the limit in
+        force. Call it again with MAX_IQ after a confirmed disable to restore.
+        Raises ValueError (out of range) or RuntimeError (not disabled, or the
+        read-back disagrees; the clamp is then left at the LOWER of the two).
+        """
+        amps = float(amps)
+        if not 0.0 < amps <= IQ_CEILING:          # NaN fails too
+            raise ValueError(f"current limit {amps} A outside 0-{IQ_CEILING} A")
+        (te,), err = self.bear.get_torque_enable(self.id)[0]
+        if te != 0:
+            raise RuntimeError(f"current limit not changed: torque_enable reads {te}, need 0")
+        self.bear.set_limit_i_max((self.id, amps))
+        (rb,), _ = self.bear.get_limit_i_max(self.id)[0]
+        if rb is None or abs(rb - amps) > 1e-3:
+            self.max_iq = min(getattr(self, 'max_iq', MAX_IQ), amps)
+            raise RuntimeError(f"limit_i_max read back {rb}, wrote {amps} A")
+        self.max_iq = amps
+        return rb
 
     def configure_watchdog(self, timeout_ms):
         """Arm the firmware watchdog for this run only. Never saved to flash."""

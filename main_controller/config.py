@@ -23,8 +23,15 @@ MODE0_MAX_ANGLE = math.radians(105.0)  # upward torque is 0 at/above this
 MODE0_TAPER     = math.radians(15.0)   # linear taper over 90-105 deg
 
 # Safety limits 
-MAX_IQ      = 5.5    # Amps. Equal to firmware limit_i_max: a goal above it
-                     # is IGNORED by firmware (not clamped), so never send one
+MAX_IQ      = 5.5    # Amps. The DEFAULT (flash) firmware limit_i_max. A goal above
+                     # the firmware limit is IGNORED (not clamped), so the software
+                     # clamp in set_iq()/exchange() always equals the limit in force.
+IQ_CEILING  = 10.0   # Amps. Highest per-run limit any script may set with
+                     # BearInterface.set_current_limit() (written per run, read back,
+                     # never saved; restored to MAX_IQ after a confirmed disable).
+                     # Oct 28: Dr. Kim approved raising current, bench and worn, "as
+                     # long as we're safe" [stated, via Sam]; 10 A (6.7 N m) is this
+                     # round's ceiling, raised in measured steps. Rated 11.8 N m.
 TEMP_WARN   = 65.0   # degrees C — start scaling torque back
 TEMP_MAX    = 75.0   # degrees C — zero torque above this
 

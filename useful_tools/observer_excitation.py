@@ -13,6 +13,13 @@ USAGE
         --arm-mass-kg 0 --arm-com-m 0 --center-deg 65 --amp-deg 5 \\
         --freq-hz 2.5 --cycles 14 --velocity 0.10 --soft-start-s 0.3
 
+--i-max A (Oct 28): per-run current limit (limit_i_max), 5.5 (default) to
+config.IQ_CEILING (10 A), for stronger spring settings. The aborts scale with it
+(sustained abort A - 0.5, one-sample trip A - 0.2, park release A - 0.5; defaults
+5.0 / 5.3 / 5.0). Restored to 5.5 after a confirmed disable.
+--bottom-deg D (Oct 28): lowest point of the sweep, 30 (default) to 60 deg. The
+down-leg current peaks near the bottom, so a stronger spring needs a higher one.
+
 --j-sine (Oct 15): the J sine test (fit_j_sine.py). Bare rig, small fast sines;
 raises limit_velocity_max to 2 rad/s and limit_acc_max to 30 rad/s^2 for that
 run only (see the J_SINE_* constants). Aborts and current limits unchanged.
@@ -83,7 +90,7 @@ from main_controller.bear_interface import BearInterface
 from main_controller.controller import (
     actuator_to_vest_deg, tau_gravity_total, tau_spring)
 from main_controller.config import (
-    LOG_DIR, MIN_ANGLE, MAX_ANGLE, TEMP_WARN, TEMP_MAX, SAFETY_CHECKS_CONFIRMED)
+    LOG_DIR, MIN_ANGLE, MAX_ANGLE, TEMP_WARN, TEMP_MAX, SAFETY_CHECKS_CONFIRMED, IQ_CEILING)
 
 # --- Envelope ----------------------------------------------------------------
 ENVELOPE_MIN_DEG = 20.0      # the excitation trajectory must stay inside this
@@ -141,6 +148,10 @@ _ap.add_argument('--center-deg', type=float, default=60.0,
                  help='sine center, actuator deg (default 60)')
 _ap.add_argument('--cycles', type=int, default=5,
                  help='sine cycles incl. ramp-in and ramp-out (default 5, min 3)')
+_ap.add_argument('--i-max', type=float, default=5.5,
+                 help='per-run current limit, 5.5-10 A (aborts scale with it)')
+_ap.add_argument('--bottom-deg', type=float, default=30.0,
+                 help='lowest point of the sweep, 30-60 deg (default 30)')
 _ap.add_argument('--j-sine', action='store_true',
                  help='J sine test: bare rig, sine only, amp <= '
                       f'{J_SINE_MAX_AMP_DEG:g} deg, centre {J_SINE_CENTER_MIN_DEG:g}-'
@@ -155,12 +166,23 @@ if not SAFETY_CHECKS_CONFIRMED:
 # NaN compares False against everything, so it would slip through every
 # envelope check below. Reject non-finite values first.
 for _name in ('arm_mass_kg', 'arm_com_m', 'velocity', 'soft_start_s',
-              'freq_hz', 'amp_deg', 'center_deg'):
+              'freq_hz', 'amp_deg', 'center_deg', 'i_max', 'bottom_deg'):
     _v = getattr(_args, _name)
     if _v is not None and not math.isfinite(_v):
         _ap.error(f"--{_name.replace('_', '-')} must be finite")
 if _args.arm_mass_kg < 0 or _args.arm_com_m < 0:
     _ap.error("--arm-mass-kg and --arm-com-m must be >= 0")
+I_MAX_DEFAULT = 5.5
+if not I_MAX_DEFAULT <= _args.i_max <= IQ_CEILING:
+    _ap.error(f"--i-max must be {I_MAX_DEFAULT}-{IQ_CEILING} A (config.IQ_CEILING)")
+if not 30.0 <= _args.bottom_deg <= 60.0:
+    _ap.error("--bottom-deg must be 30-60 deg")
+if _args.mode != 'sweep' and _args.bottom_deg != 30.0:
+    _ap.error("--bottom-deg only applies to --mode sweep")
+# Current aborts scale with the per-run limit (defaults: 5.0 / 5.3 / 5.0 A).
+IQ_ABORT_A = _args.i_max - 0.5
+IQ_TRIP_A = _args.i_max - 0.2
+LIMIT_RAISED = _args.i_max > I_MAX_DEFAULT
 ARM_MASS_KG = _args.arm_mass_kg
 ARM_COM_M = _args.arm_com_m
 MODE = _args.mode
@@ -190,7 +212,7 @@ SINE_GOAL_V_CAP = J_SINE_MAX_GOAL_VELOCITY if J_SINE else MAX_GOAL_VELOCITY
 
 # --- Sweep (validate_model.py's legs, clipped to the envelope) --------------
 SWEEP_TOP_DEG = 100.0
-SWEEP_BOTTOM_DEG = 30.0      # was 20: bare down-leg |iq| peaks ~4.8 A at 20
+SWEEP_BOTTOM_DEG = _args.bottom_deg   # default 30; was 20: bare down-leg |iq| peaks ~4.8 A at 20
                              # deg vs ~4.65 A at 30 (see IQ_ABORT_A)
 DECEL_RAD = VELOCITY * SOFT_START   # distance over which to decelerate
 RAMP_FLOOR = 0.15            # minimum ramp; without it the step decays to zero
@@ -201,7 +223,7 @@ DWELL_AT_END = 2.0           # s hold between legs (logged and monitored)
 IQ_P, IQ_I, IQ_D = 0.02, 0.02, 0.0
 VEL_P, VEL_I, VEL_D = 4.5, 0.001, 0.0
 POS_P, POS_I, POS_D = 5.0, 0.0, 0.2
-LIMIT_I_MAX = 5.5
+LIMIT_I_MAX = _args.i_max   # 5.5 default; --i-max raises it for this run
 LIMIT_VELOCITY_MAX = J_SINE_LIMIT_VELOCITY_MAX if J_SINE else 1.0
 LIMIT_ACC_MAX = J_SINE_LIMIT_ACC_MAX if J_SINE else 5.0
 
@@ -274,7 +296,7 @@ PARK_SUMMARY = (
 print(f"Park: {PARK_SUMMARY}")
 PARK_VELOCITY = 0.15
 PARK_DEADLINE_S = 20.0       # s, give up and release (validate_model: 60)
-PARK_IQ_ABORT_A = 5.0        # A, release if |present_iq| exceeds this...
+PARK_IQ_ABORT_A = IQ_ABORT_A  # A (5.0 default), release if |present_iq| exceeds this...
 PARK_IQ_COUNT = 3            # ...for this many consecutive samples
 PARK_PROGRESS_DEG = 1.0      # deg toward PARK_DEG that must happen...
 PARK_STALL_S = 2.0           # ...within this long, or release
@@ -626,7 +648,7 @@ def park_and_disable(f, writer):
                   f"{'THE ARM MAY SPRING UP INTO THE TOP STOP' if PARK_DIR > 0 else 'THE LOAD MAY DROP INTO THE BOTTOM STOP'}"
                   f" -- support the arm.")
         # Disable before touching the log: a failed write must not block it.
-        iface.disable()
+        S['disabled_ok'] = iface.disable()
         if f is not None:
             try:
                 f.write(f"# PARK: {'released early -- ' + release if release else 'parked'}\n")
@@ -676,6 +698,7 @@ try:
         raise Abort(f"Planned run {planned_s:.1f}s (approach {approach_s:.1f}s) "
                     f"exceeds the {RUN_CAP_S:.0f}s run cap")
 
+    S['limit_written'] = LIMIT_RAISED      # from here on, a confirmed exit restores it
     for name, val in SETTINGS:
         getattr(iface.bear, 'set_' + name)((iface.id, val))
 
@@ -718,7 +741,7 @@ try:
     f.write(f"# mode={MODE} arm_mass_kg={ARM_MASS_KG} arm_com_m={ARM_COM_M} "
             f"velocity={VELOCITY} soft_start_s={SOFT_START} freq_hz={FREQ_HZ} "
             f"amp_deg={AMP_DEG} center_deg={CENTER_DEG} cycles={CYCLES} "
-            f"j_sine={J_SINE}\n")
+            f"j_sine={J_SINE} i_max={LIMIT_I_MAX:g} bottom_deg={SWEEP_BOTTOM_DEG:g}\n")
     f.write(f"# units: t s since the enable command (time.monotonic), taken at "
             f"the start of the cycle (before the goal write); loop_dt s; "
             f"goal_pos, pos rad; vel rad/s (present_velocity register); "
@@ -794,7 +817,26 @@ finally:
         park_and_disable(f, writer)
     else:
         # Never enabled: nothing to park. Still leave it zeroed and disabled.
-        iface.disable()
+        S['disabled_ok'] = iface.disable()
+    if S.get('limit_written'):
+        # Put the default limit back, only after a CONFIRMED disable (no writes
+        # after an unconfirmed one). RAM only: a power cycle also restores it.
+        if S.get('disabled_ok'):
+            try:
+                _rb = iface.set_current_limit(I_MAX_DEFAULT)
+                _msg = f"limit_i_max restored to {_rb} A"
+            except Exception as e:                 # noqa: BLE001
+                _msg = (f"limit_i_max NOT restored ({e}); power-cycle the actuator "
+                        f"(flash holds {I_MAX_DEFAULT} A) before any other script")
+        else:
+            _msg = (f"limit_i_max left at {LIMIT_I_MAX:g} A (disable not confirmed; a power "
+                    f"cycle restores {I_MAX_DEFAULT} A)")
+        print(_msg)
+        if f is not None:
+            try:
+                f.write(f"# {_msg}\n")
+            except Exception:
+                pass
     if f is not None:
         f.close()
         print(f"Raw data: {log_path}")
