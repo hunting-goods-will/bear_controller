@@ -1,0 +1,42 @@
+Sweeps: logs/phase2/observer_csvs/observer_sweep_bare_20261029_142652.csv  +  logs/phase2/observer_csvs/observer_sweep_bare_20261029_145313.csv
+Drift over the session (8 bins): y RMS 0.028 (max 0.044), f RMS 0.025 (max 0.039) N m -> STABLE (gate 0.06 / 0.1)
+Reference = the average of the two sweeps.
+
+=== hold_bench_20261029_143245.csv  mode=holds  payload 0.0 kg @ 0.0 m, offset 0.0 deg
+  DATA CHECK -- PROBLEM, read before trusting the numbers
+  end: END ABORT: speed 2.04 rad/s (from position) > 2.0 for 3 cycles
+  error bytes != 0x80: 0
+  loop dt: median 2.00 ms, > 2.5 ms 0.44 %, max 3.18 ms
+  current tracking |iq - iq_sent|: median 0.018 A, p99 0.079 A
+   angle  creep u -y sweep    diff   amp cyc  still u  in band hunt p-p
+      90   -2.864   -2.768  -0.095  0.92   2   -2.857  -0.08 f    0.118
+      80   -2.892   -2.862  -0.030  1.02   2   -2.997  -0.12 f    0.092
+      70   -3.640   -3.216  -0.424  0.75   2   -3.005  +0.16 f    0.358
+
+=== hold_bench_20261029_145004.csv  mode=holds  payload 1.137 kg @ 0.213 m, offset 0.0 deg
+  DATA CHECK OK
+  end: END completed
+  error bytes != 0x80: 0
+  loop dt: median 2.00 ms, > 2.5 ms 0.33 %, max 3.25 ms
+  current tracking |iq - iq_sent|: median 0.018 A, p99 0.081 A
+   angle  creep u -y sweep    diff   amp cyc  still u  in band hunt p-p
+      90   -1.813   -2.032  +0.220  0.91   2   -1.793  +0.21 f    0.124
+      80   -1.634   -1.745  +0.111  0.98   2   -1.662  +0.07 f    0.171
+
+=== hold_thermal_20261029_153336.csv  mode=thermal  payload 0.0 kg @ 0.0 m, offset 0.0 deg
+  NOTE: this run's header names a different sweep (observer_sweep_bare_20261029_145313.csv)
+  DATA CHECK -- PROBLEM, read before trusting the numbers
+  end: END ABORT: exchange failed (all retries used)
+  error bytes != 0x80: 0
+  loop dt: median 2.00 ms, > 2.5 ms 1.59 %, max 3.16 ms
+  current tracking |iq - iq_sent|: median 0.016 A, p99 0.066 A
+  thermal hold at 95 deg: 349 s at 4.82 A rms (u -3.23 N m); winding 26.0 -> 31.2 C, powerstage 28.7 -> 36.4 C
+    winding: ambient 25.1 C [idle log (fixed)], k 0.30 C/A^2, tau 205 s, fit RMS 0.21 C -> after 600 s from cold: 5 A 32 C, 6 A 35 C, 7 A 39 C  [all under 65 C]
+    powerstage: ambient 26.6 C [idle log (fixed)], k 0.41 C/A^2, tau 99 s, fit RMS 0.42 C -> after 600 s from cold: 5 A 37 C, 6 A 41 C, 7 A 47 C  [all under 65 C]
+
+=== SUMMARY (exploratory; guides from PLAN 3.4, not pass lines)
+  H1  90 deg: creep - sweep -0.095 N m; hunting max 0.12 deg  -> looks good
+  H1  80 deg: creep - sweep -0.030 N m; hunting max 0.09 deg  -> looks good
+  H1  70 deg: creep - sweep -0.424 N m; hunting max 0.36 deg  -> in between
+  H2  90 deg: delta-u +1.051 vs m*g*r*sin +0.735 N m (ratio 1.43) -> rethink   [hold_bench_20261029_145004.csv]
+  H2  80 deg: delta-u +1.258 vs m*g*r*sin +1.117 N m (ratio 1.13) -> looks good   [hold_bench_20261029_145004.csv]

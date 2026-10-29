@@ -2,7 +2,8 @@
 
 Raw run data (the `.csv.gz` files under `human_live_csvs/`, `human_monitor_csvs/`,
 `model_validation_csvs/`, `velocity_profile_csvs/`, `spring_characterization/`,
-`phase2/observer_csvs/`, `phase2/latency/`, `phase2/watchdog/`)
+`phase2/observer_csvs/`, `phase2/latency/`, `phase2/watchdog/`, `phase2/j_release/`,
+`phase2/hold_bench/`, `phase2/probes/`)
 does not live on `main` — it lives on the orphan branch `raw-data`, which
 mirrors this directory's paths exactly. Retrieve any file with:
 
@@ -38,6 +39,9 @@ were regenerated 2026-09-25; everything under `phase2/` was generated
 | `phase2/observer/` | `phase2/observer_csvs/*.csv.gz` | `analyze_observer.py bench` (the wrench summary is the P2 run, paired with bare sweep `150800`; the `_ABORTED` run has no up leg, so the analyzer stops before P1 -- its summary says so and keeps the CSV's outcome lines) |
 | `phase2/latency/` | `phase2/latency/comm_budget_*.csv.gz` | none -- the CSV's own `#` header (written by `measure_comm_budget.py`) plus per-method stats recomputed from the rows and checked against the header's stats table |
 | `phase2/watchdog/` | `phase2/watchdog/watchdog_test_*.csv.gz` | none -- the CSV's own `#` header (T1-T5 pass/fail lines written by `watchdog_bench_test.py`) plus per-test loop timing, current and event timeline computed from the rows |
+| `phase2/j_release/` | `phase2/j_release/j_release_*.csv.gz` + the same-session bare sweeps `phase2/observer_csvs/observer_sweep_bare_20261015_{202707,205603}.csv.gz` | `fit_j_release.py` (removed from `main` in `617158f`; last version `c971b22`). One summary per fit, not per CSV. Verdict INCOMPLETE (abandoned method) |
+| `phase2/j_sine/` | `phase2/observer_csvs/observer_jsine_bare_*_20261015_*.csv.gz` | `fit_j_sine.py` (removed from `main` in `617158f`; last version `94a319f`). One summary per fit. Verdict INCOMPLETE (abandoned method) |
+| `phase2/hold_bench/` | `phase2/hold_bench/hold_bench_*.csv.gz`, `hold_thermal_*.csv.gz` + that session's bare sweeps in `phase2/observer_csvs/` | `analyze_hold_bench.py` (one summary `.txt` + `.png` per session: `hold_bench_<date>[_L2]`; the run list and sweeps are in its first line and section headers; `hold_bench_20261028` uses `--payload-r-m 0.213`, the measured r) and `compare_sweeps.py` (`sweep_compare_<date>.txt`; its margin column assumes a 5.0 A abort, wrong for `--i-max` runs) |
 
 The `phase2/` summaries were generated with pandas 3.0.6 / numpy 2.5.4 in a
 throwaway venv, because pandas is not installed in the project venv.
