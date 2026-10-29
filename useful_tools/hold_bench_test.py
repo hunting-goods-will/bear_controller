@@ -768,6 +768,7 @@ def main(argv=None):
                     if run.limit_written:
                         try:
                             rb = iface.set_current_limit(I_MAX_DEFAULT)
+                            run.limit_restored = True
                             run.footer.append(f"limit_i_max restored to {rb} A")
                         except Exception as e:             # noqa: BLE001
                             msg = (f"limit_i_max NOT restored ({e}); power-cycle the actuator "
@@ -786,6 +787,13 @@ def main(argv=None):
                     print(f"\n{msg}")
                     run.footer.append(msg)
         finally:
+            if run.limit_written and not getattr(run, 'limit_restored', False) \
+                    and not any('limit_i_max' in l for l in run.footer):
+                # e.g. a Ctrl-C landed inside disable(): not confirmed, so nothing more is written
+                msg = (f"limit_i_max left at {run.a.i_max:g} A (exit interrupted before a confirmed "
+                       f"disable; a power cycle restores {I_MAX_DEFAULT} A)")
+                print(f"\n{msg}")
+                run.footer.append(msg)
             if getattr(run, 'vel_disagree', 0):
                 run.footer.append(f"velocity register disagreed with the position by > "
                                   f"{VEL_SANITY} rad/s on {run.vel_disagree} cycles (D term used "

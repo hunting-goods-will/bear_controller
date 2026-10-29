@@ -815,6 +815,17 @@ def section4b():
     if r['csv']:
         os.remove(r['csv'])
     clock = Clock()
+    clock.kbi_after = [12.0, 12.3]
+    fake = PosFake(clock)
+    r = invoke(args7, fake, clock)
+    end = csv_end(r['csv']) if r['csv'] else ''
+    restored = r['csv'] is not None and 'limit_i_max restored to 5.5' in open(r['csv']).read()
+    check("--i-max 7, second Ctrl-C during the park: disable confirmed, limit still restored, "
+          "log closed with the note", fake.regs['limit_i_max'] == 5.5 and fake.te == 0 and restored,
+          f"limit {fake.regs['limit_i_max']}, te {fake.te}; rc {str(r['rc'])[:30]}")
+    if r['csv']:
+        os.remove(r['csv'])
+    clock = Clock()
     fake = PosFake(clock)
     r = invoke(H0_ARGS + ['--bottom-deg', '45'], fake, clock)
     WRITE_LOG['4b. sweep --bottom-deg 45'] = compress(fake.writes, fake.calls)

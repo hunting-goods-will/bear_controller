@@ -812,33 +812,38 @@ finally:
             f.write(f"# END: {end_note}\n")
         except Exception:
             pass
-    if enable_attempted:
-        print("Parking before release.")
-        park_and_disable(f, writer)
-    else:
-        # Never enabled: nothing to park. Still leave it zeroed and disabled.
-        S['disabled_ok'] = iface.disable()
-    if S.get('limit_written'):
-        # Put the default limit back, only after a CONFIRMED disable (no writes
-        # after an unconfirmed one). RAM only: a power cycle also restores it.
-        if S.get('disabled_ok'):
-            try:
-                _rb = iface.set_current_limit(I_MAX_DEFAULT)
-                _msg = f"limit_i_max restored to {_rb} A"
-            except Exception as e:                 # noqa: BLE001
-                _msg = (f"limit_i_max NOT restored ({e}); power-cycle the actuator "
-                        f"(flash holds {I_MAX_DEFAULT} A) before any other script")
+    try:
+        if enable_attempted:
+            print("Parking before release.")
+            park_and_disable(f, writer)
         else:
-            _msg = (f"limit_i_max left at {LIMIT_I_MAX:g} A (disable not confirmed; a power "
-                    f"cycle restores {I_MAX_DEFAULT} A)")
-        print(_msg)
+            # Never enabled: nothing to park. Still leave it zeroed and disabled.
+            S['disabled_ok'] = iface.disable()
+    finally:
+        # In its own finally (Claude Code, Oct 28): a second Ctrl-C during the
+        # park re-raises out of park_and_disable() AFTER its disable(), and used
+        # to skip the restore and the file close silently.
+        if S.get('limit_written'):
+            # Put the default limit back, only after a CONFIRMED disable (no writes
+            # after an unconfirmed one). RAM only: a power cycle also restores it.
+            if S.get('disabled_ok'):
+                try:
+                    _rb = iface.set_current_limit(I_MAX_DEFAULT)
+                    _msg = f"limit_i_max restored to {_rb} A"
+                except Exception as e:                 # noqa: BLE001
+                    _msg = (f"limit_i_max NOT restored ({e}); power-cycle the actuator "
+                            f"(flash holds {I_MAX_DEFAULT} A) before any other script")
+            else:
+                _msg = (f"limit_i_max left at {LIMIT_I_MAX:g} A (disable not confirmed; a power "
+                        f"cycle restores {I_MAX_DEFAULT} A)")
+            print(_msg)
+            if f is not None:
+                try:
+                    f.write(f"# {_msg}\n")
+                except Exception:
+                    pass
         if f is not None:
-            try:
-                f.write(f"# {_msg}\n")
-            except Exception:
-                pass
-    if f is not None:
-        f.close()
-        print(f"Raw data: {log_path}")
+            f.close()
+            print(f"Raw data: {log_path}")
 
 sys.exit(exit_code)

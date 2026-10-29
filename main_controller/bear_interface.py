@@ -308,7 +308,11 @@ class BearInterface:
         self.bear.set_limit_i_max((self.id, amps))
         (rb,), _ = self.bear.get_limit_i_max(self.id)[0]
         if rb is None or abs(rb - amps) > 1e-3:
-            self.max_iq = min(getattr(self, 'max_iq', MAX_IQ), amps)
+            # The firmware's real limit is the read-back: never let the clamp sit above it
+            cands = [getattr(self, 'max_iq', MAX_IQ), amps]
+            if rb is not None and rb == rb and rb > 0:
+                cands.append(float(rb))
+            self.max_iq = min(cands)
             raise RuntimeError(f"limit_i_max read back {rb}, wrote {amps} A")
         self.max_iq = amps
         return rb

@@ -328,6 +328,8 @@ def invoke(fake, argv, clock, typed='GO', rt=True):
             rc = hb.main(argv)
         except SystemExit as e:
             rc = f"SystemExit({e.code!s:.300})"
+        except KeyboardInterrupt:
+            rc = 'KeyboardInterrupt (escaped main)'
     files = sorted(os.listdir(logdir))
     res = {'rc': rc, 'out': out.getvalue(), 'ports': len(made),
            'writes': fake.writes[n0:], 'csv': None, 'run': RUNS[-1] if RUNS else None}
@@ -834,7 +836,37 @@ def main():
     iface.bear, iface.id = fake, 1
     rb = iface.set_current_limit(8.0)
     check("set_current_limit(8) while disabled: written, read back, clamp follows",
-          rb == 8.0 and fake.regs['limit_i_max'] == 8.0 and iface.max_iq == 8.0)
+          rb == 8.0 and fake.regs['limit_i_max'] == 8.0 and getattr(iface, 'max_iq', None) == 8.0)
+    clock = Clock()
+    fake = FakeBear(clock)
+    fake.drop_write = lambda n, v: n == 'limit_i_max'
+    fake.regs['limit_i_max'] = 4.0              # firmware actually below both old and new
+    iface = bi.BearInterface.__new__(bi.BearInterface)
+    iface.bear, iface.id = fake, 1
+    try:
+        iface.set_current_limit(8.0)
+    except RuntimeError:
+        pass
+    check("bad read-back (4.0) below old (5.5) and new (8): clamp follows the read-back",
+          getattr(iface, 'max_iq', None) == 4.0, f"max_iq {getattr(iface, 'max_iq', None)}")
+
+    clock = Clock()
+    fake = FakeBear(clock, spring_scale=1.6)
+    calls = []
+    real_disable = bi.BearInterface.disable
+
+    def ki_disable(self):
+        calls.append(1)
+        if len(calls) == 1:
+            raise KeyboardInterrupt
+        return real_disable(self)
+    fake.err_override = lambda x: 0x90 if after(T_ARM)(x) else None
+    with mock.patch.object(bi.BearInterface, 'disable', ki_disable):
+        res = invoke(fake, bare_args(sweep_mid, '--i-max', '8'), clock)
+    lw = [w[2] for w in res['writes'] if w[1] == 'limit_i_max']
+    check("Ctrl-C inside disable() with a raised limit: no restore write, footer says it was left",
+          lw == [8.0] and res['csv'] is not None
+          and any('left at 8' in l for l in res['csv']['comments']), f"{lw}; rc {res['rc']}")
 
     print("\n11. Idle log (--idle-s): reads only, then the normal run")
     clock = Clock()
