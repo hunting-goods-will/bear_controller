@@ -140,13 +140,15 @@ temperatures every loop, with `loop_dt`. Every file starts with `#` header
 lines (argv, all limits, set/readback of gains and limits, park target) and
 ends with `# END:` / `# PARK:` outcome lines; read with
 `pd.read_csv(path, comment='#')`. The `# ... started` header line (time of
-enable) is the authoritative start time. Dated 2026-09-30 to 2026-10-15.
+enable) is the authoritative start time. Dated 2026-09-30 to 2026-10-28.
 
 Provenance: observer_excitation.py logs no git hash. The Oct 14–15 sweeps
 have the 17-column schema of the committed `501db9b` version. The `jsine`
 runs have the 20-column schema (adds `t_pos, t_vel, t_iq`) of the version
 committed later in `94a319f`; the file was last modified Oct 15 21:42,
-before the first sine run.
+before the first sine run. The Oct 28 sweeps are told apart by their
+`limit_position_max` read-back: `125644` used 118° (the committed `617158f`
+version), and `192538` / `193116` used 125° (the version committed in `066bf1d`).
 
 | File | Notes |
 |---|---|
@@ -162,6 +164,32 @@ before the first sine run.
 | `observer_jsine_bare_1.5Hz_20261015_214948.csv.gz` | As `0.5Hz`, 1.5 Hz, 10 cycles. **Complete**, parked. Peak 3.66 A. Measured amplitude 1.24°. |
 | `observer_jsine_bare_2Hz_20261015_215057.csv.gz` | As `0.5Hz`, 2.0 Hz, 12 cycles. **Complete**, parked. Peak 3.79 A. Measured amplitude 1.04°. |
 | `observer_jsine_bare_2.5Hz_20261015_215156.csv.gz` | As `0.5Hz`, 2.5 Hz, 14 cycles. **Complete**, parked. Peak 3.64 A. Measured amplitude 0.95°. J sine fit over the five runs (`main`: `logs/summaries/phase2/j_sine/j_sine_fit_20261015.txt`): J −0.025 kg m², R² 0.36, verdict **INCOMPLETE**. The arm tracked only 19–50 % of the goal amplitude (stick-slip). |
+| `observer_sweep_bare_20261028_125644.csv.gz` | Oct 28 H0 (args as `20261014_220311`), **complete**, parked. Peak \|present_iq\| 4.59 A (lowest-of-3 4.44). Ran with the **old** `limit_position_max` = 118° (read-back 2.05949 rad). Per `observer_excitation.py`'s comment, the park release's bounce past 118° latched Joint Limit (0x90) after this run. That isn't recorded in this CSV, which ends `PARK: parked`. The session sweep passed to every Oct 28 `hold_bench_test` run. |
+| `observer_sweep_bare_20261028_192538.csv.gz` | Oct 28 evening H0, **complete**, parked. Peak 4.66 A (lowest-of-3 4.50). First run with `limit_position_max` = **125°** (read-back 2.18166 rad; the fix committed on `main` in `066bf1d`). Against `125644` (389 min earlier): RMS dy 0.084 (max 0.123), RMS df 0.027 N m, so **MOVED** (`main`: `logs/summaries/phase2/hold_bench/sweep_compare_20261028.txt`). |
+| `observer_sweep_bare_20261028_193116.csv.gz` | Repeat of `192538`, 6 min later, limit 125°. **Complete**, parked. Peak 4.63 A (lowest-of-3 4.48). Against `192538`: RMS dy 0.025, RMS df 0.018 N m, so STABLE. |
+
+### `phase2/hold_bench/` — torque-mode hold bench test (H1–H3)
+Producer: `useful_tools/hold_bench_test.py` (on `main` since `617158f`; the file
+itself is unchanged since then). **Enables torque (Mode 0).** A software PID hold
+on position at 80 / 60 / 40° (settle 3 s, still 10 s, creep ±1° at 0.25 Hz x 3),
+then a ramp to 118° and a fade. `--payload-*` gives H2; `--thermal` gives H3, one
+still hold at 60° for up to 600 s (rows logged at 50 Hz). One row per 2 ms cycle;
+`#` header (git hash + dirty flag, argv-equivalent settings, the `--sweep` path,
+gain read-back, predictions, release check); `#` footer (disable confirmation,
+`quick:` numbers, `END`). Read with `pd.read_csv(path, comment='#')`. All runs log
+`git 617158f dirty=yes`: the `enable()` mode-first fix in `bear_interface.py`
+was uncommitted at the time (committed in `066bf1d`). Every run used the session
+sweep `observer_sweep_bare_20261028_125644`. Analysed by `analyze_hold_bench.py`
+(`main`: `logs/summaries/phase2/hold_bench/hold_bench_20261028.{txt,png}`).
+Dated 2026-10-28.
+
+| File | Notes |
+|---|---|
+| `hold_bench_20261028_131713.csv.gz` | Bare holds. **Refused at `enable()`**: `goal_iq reads -5.5, not 0`. The old `enable()` wrote goal_iq while the actuator was still in Position Mode (mode 2) after the sweep, where goal_iq writes are ignored. Never enabled; `disable()` confirmed, watchdog reset to 0. Header and footer only, no rows. |
+| `hold_bench_20261028_131743.csv.gz` | Same as `131713`, 30 s later, same refusal. No rows. These two refusals led to the mode-first `enable()` fix. |
+| `hold_bench_20261028_132245.csv.gz` | **H1**, bare, **completed**. Peak \|iq\| 4.14 A. Creep u vs the sweep's −y: 80° −0.001, 60° −0.042, 40° −0.018 N m; hunting ≤ 0.25° p-p. The final ramp ended at 112.4° (the arm reached the stop). Loop dt median 2.00 ms, max 3.23 ms; no error bytes. |
+| `hold_bench_20261028_184306.csv.gz` | **H2**, 1.137 kg payload, run with `--payload-r-m 0.14`, but the **measured r is 0.213 m**. **Completed**. Peak \|iq\| 3.11 A. The committed summary's H2 ratios (1.45 / 1.63 / 1.53, "rethink") use the wrong 0.14 m. With 0.213 m, delta-u / (m·g·r·sin) is **0.95 / 1.08 / 1.00** at 80 / 60 / 40°. Also, the header's release check (+0.248 N m, accepted) used 0.14 m. With 0.213 m it would have **refused**: −0.49 N m at 38.5°, which friction (0.93 N m) would hold, so a released weight would not have fallen. The final ramp ended at 103.3°. |
+| `hold_thermal_20261028_194521.csv.gz` | **H3**, bare, still hold at 60°, `--thermal-s 600`. **Aborted after 451 s of the hold: `exchange failed (all retries used)`**, a comm failure, with no error bytes before it. `disable()` was confirmed on attempt 1 and the watchdog reset. 1.92 A rms (u −1.28 N m); winding 25.5 → 26.75 °C, powerstage 28.8 → 32.1 °C (first → last row of the hold). Peak \|iq\| 3.84 A. |
 
 ### `phase2/j_release/` — J release test (Block 4, abandoned method)
 Producer: `useful_tools/j_release_test.py` (on `main` since `fdf0c7a`, last
