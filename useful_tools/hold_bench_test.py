@@ -35,6 +35,15 @@ and read up to 0.12 N m off. It averages to zero over whole cycles.
 The bare rig rests on the stop because the spring beats gravity, so every
 hold here needs DOWNWARD (negative) torque; the worn version is upward-only.
 
+  --creep-scale-f F0   (N m; default off) creep amplitude at each hold angle =
+      --creep-deg x f/F0, f = the sweep's friction there, kept to 0.5-2 deg; the
+      amplitudes go in the header. For Level 2, where f is 1.35 at 70 deg vs 1.16 at
+      80-90 and the 70 deg creep stuck (Oct 29). The quick line now also gives the
+      last creep cycle's p-p angle, marked STUCK below 0.5 deg: a creep reading is
+      only a measurement if the arm slid. Fake (Level 2 rig, Oct 29): amplitude or
+      feedforward handles a static excess up to ~0.25 N m; an upward breakaway with
+      0.47 N m of excess overshoots > 5 deg at the 4 N m/s rate limit whatever the
+      creep (STATE 8 #31).
   --payload-kg/--payload-r-m/--payload-angle-deg   H2 (header + the current check)
   --thermal                                        H3: one still hold at
       --thermal-deg (60) for --thermal-s (<= 1800) s; ends early, normally, at
@@ -42,6 +51,12 @@ hold here needs DOWNWARD (negative) torque; the worn version is upward-only.
   --idle-s N      before arming (after GO), log temperatures and state for N s
                   with NO writes (5 Hz rows, phase 'idle'): the thermal fit's
                   starting state and ambient. Use with --thermal from cold.
+                  A failed read here is skipped and counted (Oct 29: two idle
+                  logs were lost to one failed read each); it stops, with no
+                  writes, after 5 failed reads in a row or 25 in all, and if it
+                  ends on a failure one fresh read must succeed, and pass the
+                  same checks (error byte, heat, arm on the stop), before arming.
+                  The failures' times go in the header ("idle failed reads").
   --i-max A       per-run firmware current limit, 5.5 (default, nothing written)
                   to IQ_CEILING (10 A). Written while disabled and read back
                   (BearInterface.set_current_limit), restored to 5.5 after a
@@ -101,6 +116,7 @@ import argparse
 import csv
 import math
 import os
+import struct
 import subprocess
 import time
 
@@ -140,6 +156,10 @@ CREEP_FF = 0.8                     # x sweep friction; see creep_ff(). Under 1 o
                                    # fake (the Phase 1 k_f < 1 lesson); x0.6-0.8 read
                                    # within 0.02 N m with 0.74-0.98 deg of creep.
 CREEP_FF_RANGE = (0.0, 1.0)
+CREEP_SCALE_F_RANGE = (0.5, 2.0)   # --creep-scale-f F0 (N m): amplitude = creep_deg x f(angle)/F0,
+                                   # kept inside CREEP_DEG_RANGE. Level 2 (Oct 29): f is 1.35 at
+                                   # 70 deg vs 1.16 at 80-90, and the 70 deg creep stuck.
+CREEP_STUCK_PP_DEG = 0.5           # quick line: last creep cycle moved less than this -> STUCK
 END_DEG = 118.0                    # final target, ~1.5 deg ABOVE the top stop
                                    # (116.5; rests 115-116.5). The arm rides up at
                                    # 0.1 rad/s onto the stop under control, the
@@ -152,6 +172,11 @@ THERMAL_DEG, THERMAL_S = 60.0, 600.0
 THERMAL_S_RANGE = (10.0, 1800.0)
 IDLE_S_RANGE = (0.0, 1800.0)
 IDLE_PERIOD_S = 0.2                # 5 Hz rows during the idle log
+IDLE_FAIL_RUN_MAX = 5              # idle: this many failed reads IN A ROW (1 s) -> stop, no writes
+IDLE_FAIL_TOTAL_MAX = 25           # idle: or this many in all -> stop: too flaky to arm on
+# What PyBEAR itself can RAISE on malformed bytes (a valid-checksum reply of the wrong
+# length is decoded anyway -> struct.error; found Oct 29 on the comms soak fake).
+IDLE_READ_EXC = (struct.error, IndexError, ValueError, TypeError)
 THERMAL_LOG_EVERY = 10             # 50 Hz rows during the thermal hold
 
 # ---- Checks -------------------------------------------------------------------
@@ -261,7 +286,8 @@ def build_plan(start_rad, a):
             segs.append(('thermal', k, deg, a.thermal_s, (lambda tau, x=tgt: x)))
         else:
             segs.append(('still', k, deg, STILL_S, (lambda tau, x=tgt: x)))
-            amp, w = math.radians(a.creep_deg), 2 * math.pi * a.creep_hz
+            amps = getattr(a, 'creep_amps', None)
+            amp, w = math.radians(amps[k] if amps else a.creep_deg), 2 * math.pi * a.creep_hz
             segs.append(('creep', k, deg, a.creep_cycles / a.creep_hz,
                          (lambda tau, x=tgt, amp=amp, w=w:
                           x + creep_env(tau, a) * amp * math.sin(w * tau))))
@@ -337,6 +363,9 @@ def parse_args(argv):
     ap.add_argument('--payload-r-m', type=float, default=0.0)
     ap.add_argument('--payload-angle-deg', type=float, default=0.0,
                     help="weight's line offset from the vest reference (header + check)")
+    ap.add_argument('--creep-scale-f', type=float, default=0.0,
+                    help='F0 in N m: creep amplitude at each angle = --creep-deg x f/F0 (the '
+                         "sweep's friction there), kept to 0.5-2 deg; 0 = off (default)")
     ap.add_argument('--creep-ff', type=float, default=CREEP_FF,
                     help='friction feedforward during the creep, x sweep friction (0 = off)')
     ap.add_argument('--release-margin', type=float, default=NET_MARGIN,
@@ -390,11 +419,18 @@ def parse_args(argv):
     for name, rng in (('kp', KP_RANGE), ('ki', KI_RANGE), ('kd', KD_RANGE)):
         if not rng[0] <= getattr(a, name) <= rng[1]:
             ap.error(f'--{name} must be {rng[0]:g}-{rng[1]:g}')
+    if a.creep_scale_f and not CREEP_SCALE_F_RANGE[0] <= a.creep_scale_f <= CREEP_SCALE_F_RANGE[1]:
+        ap.error(f'--creep-scale-f must be 0 (off) or {CREEP_SCALE_F_RANGE[0]}-{CREEP_SCALE_F_RANGE[1]} N m')
     a.table = ST.sweep_tables(a.sweep)           # SystemExit if not a bare sweep
     try:
         a.pred = predictions(a.table, a)
     except ValueError as e:
         ap.error(str(e))
+    a.creep_amps = None                          # per-angle creep amplitude (deg), if scaled
+    if a.creep_scale_f and not a.thermal:
+        a.creep_amps = [min(CREEP_DEG_RANGE[1],
+                            max(CREEP_DEG_RANGE[0], a.creep_deg * p['f'] / a.creep_scale_f))
+                        for p in a.pred]
     if not 0.1 <= a.release_margin <= 0.5:
         ap.error('--release-margin must be 0.1-0.5 N m')
     a.release = None
@@ -477,6 +513,10 @@ class Run:
             f"mode={'thermal' if a.thermal else 'holds'} angles={a.angles if not a.thermal else [a.thermal_deg]} "
             f"creep_deg={a.creep_deg} creep_hz={a.creep_hz} creep_cycles={a.creep_cycles} creep_ff={a.creep_ff} "
             f"thermal_s={a.thermal_s if a.thermal else 0}",
+            ("creep amplitude per angle (--creep-scale-f "
+             f"{a.creep_scale_f:g} N m): " + ', '.join(
+                 f"{p['deg']:g} deg {amp:.2f} (f {p['f']:.2f})" for p, amp in zip(a.pred, a.creep_amps))
+             if a.creep_amps else "creep amplitude: --creep-deg at every angle"),
             f"payload_kg={a.payload_kg} payload_r_m={a.payload_r_m} "
             f"payload_angle_deg={a.payload_angle_deg}",
             f"gains kp={a.kp} ki={a.ki} kd={a.kd}  rate={RATE_NM_S} N m/s  "
@@ -502,43 +542,96 @@ class Run:
             print(line)
 
     # -- idle log (reads only, before arming) -------------------------------------
+    def idle_read(self):
+        """One idle-log read. Returns (values, err), or (None, None) if it failed --
+        including when PyBEAR raised on malformed bytes (IDLE_READ_EXC)."""
+        try:
+            values, err = self.iface.bear.bulk_read([self.iface.id], self.iface.LOOP_READ_REGS)[0]
+        except IDLE_READ_EXC:
+            return None, None
+        if err is None or any(v is None for v in values):
+            return None, None
+        return values, err
+
     def idle(self):
         """Log state at 5 Hz for --idle-s seconds with NO writes, so a thermal
         fit knows the starting state (cold, or still cooling from a sweep).
-        Stops (no writes) on an error byte, heat, or the arm leaving the stop."""
-        a, bear, i = self.a, self.iface.bear, self.iface.id
+        Stops (no writes) on an error byte, heat, or the arm leaving the stop.
+        A failed read is skipped and counted (nothing is commanded here, so one
+        lost read costs nothing; Oct 29 two idle logs were lost to one failed
+        read each). It stops only on IDLE_FAIL_RUN_MAX failures in a row or
+        IDLE_FAIL_TOTAL_MAX in all; and if the log ends on a failure, one fresh
+        read must succeed, and pass the same checks, before arming. Every
+        failure's time goes in the header."""
+        a = self.a
         if a.idle_s <= 0:
             return
         print(f"Idle log {a.idle_s:.0f} s (no writes; Ctrl-C stops with nothing written)...")
         t_start = time.monotonic()
         nxt = t_start
         first = last = None
+        fails, in_row = [], 0
         while time.monotonic() - t_start < a.idle_s:
-            values, err = bear.bulk_read([i], self.iface.LOOP_READ_REGS)[0]
+            values, err = self.idle_read()
             now = time.monotonic()
-            if err is None or any(v is None for v in values):
-                raise Abort("idle log: read failed")
+            if values is None:
+                fails.append(now - self.t0)
+                in_row += 1
+                if in_row >= IDLE_FAIL_RUN_MAX or len(fails) >= IDLE_FAIL_TOTAL_MAX:
+                    self.idle_fail_note(fails)
+                    raise Abort(f"idle log: {in_row} failed reads in a row, {len(fails)} in all "
+                                f"(limits {IDLE_FAIL_RUN_MAX} / {IDLE_FAIL_TOTAL_MAX})")
+                nxt += IDLE_PERIOD_S
+                s = nxt - time.monotonic()
+                if s > 0:
+                    time.sleep(s)
+                continue
+            in_row = 0
             pos, vel, iq, tw, tp = values
             self.log([now - self.t0, IDLE_PERIOD_S, PHASES.index('idle'), -2, float('nan'),
                       float('nan'), pos, vel, iq, float('nan'), float('nan'), float('nan'),
                       float('nan'), tw, tp, err])
             first = first or (now, tw, tp)
             last = (now, tw, tp)
-            if err != 0x80:
-                raise Abort(f"idle log: error byte {hex(err)}")
-            if max(tw, tp) >= TEMP_WARN:
-                raise Abort(f"idle log: temperature {max(tw, tp):.1f} C >= {TEMP_WARN} C")
-            if math.degrees(pos) < REST_MIN_DEG:
-                raise Abort(f"idle log: arm left the top stop ({math.degrees(pos):.1f} deg)")
+            self.idle_check(values, err, 'idle log')
             nxt += IDLE_PERIOD_S
             s = nxt - time.monotonic()
             if s > 0:
                 time.sleep(s)
+        if in_row:                                   # ended on a failure: the link must answer now
+            values, err = self.idle_read()
+            if values is None:
+                fails.append(time.monotonic() - self.t0)
+            self.idle_fail_note(fails)
+            if values is None:
+                raise Abort("idle log: the actuator is not answering at arming "
+                            f"({len(fails)} failed reads)")
+            self.idle_check(values, err, 'idle log (fresh read before arming)')
+        else:
+            self.idle_fail_note(fails)
         if first and last:
             mins = max((last[0] - first[0]) / 60.0, 1e-9)
             self.header.append(f"idle {a.idle_s:.0f} s: winding {first[1]:.2f} -> {last[1]:.2f} C, "
                                f"powerstage {first[2]:.2f} -> {last[2]:.2f} C "
                                f"({(last[1] - first[1]) / mins:+.2f} / {(last[2] - first[2]) / mins:+.2f} C/min)")
+            print(self.header[-1])
+
+    def idle_check(self, values, err, where):
+        """The checks every idle read gets, and the fresh read before arming: error
+        byte, heat, arm on the stop. Raises Abort (nothing has been written)."""
+        pos, vel, iq, tw, tp = values
+        if err != 0x80:
+            raise Abort(f"{where}: error byte {hex(err)}")
+        if max(tw, tp) >= TEMP_WARN:
+            raise Abort(f"{where}: temperature {max(tw, tp):.1f} C >= {TEMP_WARN} C")
+        if math.degrees(pos) < REST_MIN_DEG:
+            raise Abort(f"{where}: arm left the top stop ({math.degrees(pos):.1f} deg)")
+
+    def idle_fail_note(self, fails):
+        """Header line: how many idle reads failed and when (s since t0), for #30."""
+        shown = ', '.join(f"{t:.1f}" for t in fails[:10]) + (' ...' if len(fails) > 10 else '')
+        self.header.append(f"idle failed reads: {len(fails)}" + (f" at t = {shown} s" if fails else ''))
+        if fails:
             print(self.header[-1])
 
     # -- the loop ----------------------------------------------------------------
@@ -685,9 +778,13 @@ class Run:
                 keep = m_cr & (d[:, col['t']] >= tt.min() + per)    # skip cycle 1
                 ncyc = int(round((tt.max() - tt.min()) * self.a.creep_hz)) - 1
                 if ncyc >= 1 and keep.any():
+                    lastc = m_cr & (d[:, col['t']] >= tt.max() - per)
+                    pp = np.degrees(np.ptp(d[lastc, col['pos']])) if lastc.any() else float('nan')
                     parts.append(f"creep u {KT * np.mean(d[keep, col['iq']]):+.3f} N m "
                                  f"(cycles 2-{ncyc + 1}), measured amp "
-                                 f"{np.degrees(np.ptp(d[keep, col['pos']])) / 2:.2f} deg")
+                                 f"{np.degrees(np.ptp(d[keep, col['pos']])) / 2:.2f} deg, "
+                                 f"last cycle p-p {pp:.2f} deg"
+                                 + (" STUCK" if pp < CREEP_STUCK_PP_DEG else ""))
             if m_th.any():
                 parts.append(f"thermal {d[m_th, col['t']].max() - d[m_th, col['t']].min():.0f} s, "
                              f"u {KT * np.mean(d[m_th, col['iq']]):+.3f} N m, winding "

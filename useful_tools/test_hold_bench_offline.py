@@ -37,6 +37,7 @@ import math
 import os
 import random
 import shutil
+import struct
 import tempfile
 import time
 from unittest import mock
@@ -59,6 +60,59 @@ from main_controller.controller import (TAU_SPRING_TABLE, RIG_MGL,    # noqa: E4
                                         KT, PHI_DEG)
 import hold_bench_test as hb                                          # noqa: E402
 import sweep_tables as ST                                             # noqa: E402
+
+# ---- Level 2 rig (STATE 8 #31), measured Oct 29 ----------------------------------
+# Average of the two Level 2 bare sweeps (observer_sweep_bare_20261029_142652 and
+# _145313, raw-data b8884e7), per 5-deg vest bin, actuator deg:
+L2_ACT = (63.1, 68.1, 73.0, 78.0, 83.0, 88.0, 93.0, 97.5)
+L2_Y = (3.576, 3.292, 3.088, 2.892, 2.817, 2.785, 2.742, 2.744)    # spring - rig gravity, N m
+L2_F = (1.036, 1.372, 1.311, 1.148, 1.168, 1.151, 1.172, 1.112)    # sliding friction at 0.1 rad/s
+# Above the sweep (it stops at ~98 deg) y FALLS steeply toward the stop. Estimated from
+# the first down-ramp of H1 L2 where the arm slid steadily (u + y + f = 0, f from the
+# nearest bin): 2.57 at 101 deg, 0.81 at 109 deg [inferred, 40-46 samples each; the
+# same method gave 2.83 at 95 vs the sweep's 2.74]. At the stop: 0 assumed.
+L2_ACT_ALL = L2_ACT + (101.0, 109.0, 116.5)
+L2_Y_ALL = L2_Y + (2.57, 0.81, 0.0)
+# Static friction ABOVE sliding, from hold_bench_20261029_143245 (H1 L2) with the same y:
+# the arm held a net 1.82 N m without moving at 70 deg (sweep f there 1.35 -> gap ~0.47);
+# at 80 and 90 deg the stuck maximum (1.09 / 1.15) matched the sweep's f (1.16 / 1.16)
+# -> gap ~0. One run, three angles [inferred]; the band edges are a guess.
+L2_GAP_NM, L2_GAP_FULL_DEG, L2_GAP_ZERO_DEG = 0.47, 72.0, 80.0
+# During the up-ramp breakaway the arm plateaued at ~1.8-1.9 rad/s with a net 1.4-1.6 N m
+# still pushing -> sliding friction ~1.5 N m there vs 1.35 at 0.1 rad/s -> viscous ~0.09.
+L2_BV = 0.09
+# Winding heating measured Oct 29 (H3 at 4.8 A, settled start): k 0.30 C/A^2, tau 205 s.
+# (The default fake's 3 C/A^2 was set for 2-4 A holds; at Level 2's 6-7 A it crosses
+# TEMP_WARN and the script's thermal derate -- correctly -- withholds the torque.)
+L2_HEAT = (0.30, 205.0)
+
+
+def l2_y(act):
+    return float(np.interp(math.degrees(act), L2_ACT_ALL, L2_Y_ALL))   # held flat below 63
+
+
+def l2_fc(act):
+    return float(np.interp(math.degrees(act), L2_ACT, L2_F))
+
+
+def l2_fs(act, gap=L2_GAP_NM):
+    """Static (break-free) friction: sliding + gap below 72 deg, tapering to 0 at 80 deg."""
+    deg = math.degrees(act)
+    w = min(1.0, max(0.0, (L2_GAP_ZERO_DEG - deg) / (L2_GAP_ZERO_DEG - L2_GAP_FULL_DEG)))
+    return l2_fc(act) + gap * w
+
+
+def l2_fake(clock, J=0.015, start_deg=116.5, gap_up=L2_GAP_NM, gap_down=L2_GAP_NM):
+    """FakeBear with the Level 2 rig's measured y, sliding friction and heating, plus an
+    adjustable static excess (N m, in the 72-80 deg band) to break free UP and DOWN. The
+    real arm at 70 deg sometimes slipped near the sliding value and sometimes held ~0.47
+    above it, in both directions, so the tests use 0 / up only / both."""
+    return FakeBear(clock, J=J, start_deg=start_deg,
+                    spring_fn=lambda a: l2_y(a) + rig_grav(a),
+                    fric=dict(fc=l2_fc, fs_up=lambda a: l2_fs(a, gap_up),
+                              fs_down=lambda a: l2_fs(a, gap_down), bv=L2_BV),
+                    heat=L2_HEAT)
+
 
 BUS_S = 0.0005
 SUB_S = 0.0002
@@ -117,12 +171,19 @@ class Clock:
 
 class FakeBear:
     def __init__(self, clock, J=0.015, start_deg=116.5, payload=(0.0, 0.0, 0.0),
-                 spring_scale=1.0):
+                 spring_scale=1.0, spring_fn=None, fric=None, heat=(3.0, 120.0)):
         self.clock = clock
         clock.sim = self
         self.J = J
         self.payload = payload
         self.spring_scale = spring_scale
+        # optional: spring torque as fn(act rad) (replaces table x scale), and friction
+        # as dict(fc=fn(act) sliding, fs_up / fs_down=fn(act) static to break free upward /
+        # downward, bv=viscous) (replaces FS/FC/BV)
+        self.spring_fn = spring_fn
+        self.fric = fric
+        self.breakaways = []       # (t, act deg, |net| N m) each time the stuck arm starts to slide
+        self.heat_k, self.heat_tau = heat   # winding: steady rise k C/A^2, time constant tau s
         self.pos = math.radians(start_deg)
         self.vel = 0.0
         self.iq = 0.0
@@ -162,24 +223,32 @@ class FakeBear:
         target = self.regs['goal_iq'] if driving else 0.0
         self.iq += (target - self.iq) * min(1.0, h / IQ_TAU)
         kg, r, off = self.payload
-        net = (KT * self.iq + spring_nm(self.pos, self.spring_scale) - rig_grav(self.pos)
+        spring = (self.spring_fn(self.pos) if self.spring_fn
+                  else spring_nm(self.pos, self.spring_scale))
+        net = (KT * self.iq + spring - rig_grav(self.pos)
                - (kg * G * r * math.sin(self.pos + math.radians(PHI_DEG + off)) if kg else 0.0)
                + (self.ext_torque(self) if self.ext_torque else 0.0))
-        fs = self.max_fric_override if self.max_fric_override else FS
-        fc = self.max_fric_override if self.max_fric_override else FC
-        if self.vel == 0.0:
-            if abs(net) > fs:
-                self.vel = (net - math.copysign(fc, net)) / self.J * h
+        if self.fric:
+            fc, bv = self.fric['fc'](self.pos), self.fric['bv']
+            fs_up, fs_dn = self.fric['fs_up'](self.pos), self.fric['fs_down'](self.pos)
         else:
-            new = self.vel + (net - math.copysign(fc, self.vel) - BV * self.vel) / self.J * h
+            fc, bv, fs_up, fs_dn = FC, BV, FS, FS
+        if self.max_fric_override:
+            fs_up = fs_dn = fc = self.max_fric_override
+        if self.vel == 0.0:
+            if net > fs_up or net < -fs_dn:
+                self.vel = (net - math.copysign(fc, net)) / self.J * h
+                self.breakaways.append((self.clock.t, math.degrees(self.pos), net))
+        else:
+            new = self.vel + (net - math.copysign(fc, self.vel) - bv * self.vel) / self.J * h
             self.vel = 0.0 if new * self.vel < 0 else new
         self.pos += self.vel * h
         if self.pos >= TOP:
             self.pos, self.vel = TOP, min(self.vel, 0.0)
         if self.pos <= 0.0:
             self.pos, self.vel = 0.0, max(self.vel, 0.0)
-        # winding temperature: steady rise 3 C/A^2, tau 120 s
-        self.temp_w += ((30.0 + 3.0 * self.iq ** 2) - self.temp_w) * h / 120.0
+        # winding temperature: steady rise heat_k C/A^2 (3 by default), tau heat_tau (120 s)
+        self.temp_w += ((30.0 + self.heat_k * self.iq ** 2) - self.temp_w) * h / self.heat_tau
 
     # -- registers -----------------------------------------------------------
     def _read(self, name):
@@ -267,11 +336,12 @@ class FakeBear:
 
 
 # ---------------------------------------------------------------------------
-def make_sweep(path, spring_scale=1.0, lo=30.0, hi=100.0, mass=0.0):
-    """A bare observer_excitation-format sweep from the fake's own physics."""
+def make_sweep(path, spring_scale=1.0, lo=30.0, hi=100.0, mass=0.0, y_fn=None, f_fn=None, bv=BV):
+    """A bare observer_excitation-format sweep from the fake's own physics.
+    y_fn / f_fn (fn(act rad) -> N m) replace the table spring and FC (Level 2 fake)."""
     v, dt = 0.10, 0.002
     rng = random.Random(3)
-    f_slide = FC + BV * v
+    f_const = FC + BV * v
     with open(path, 'w', newline='') as f:
         f.write(f"# observer_excitation.py mode=sweep arm_mass_kg={mass} arm_com_m=0 "
                 f"velocity={v} soft_start_s=0.3 (FAKE, test_hold_bench_offline.py)\n")
@@ -282,7 +352,8 @@ def make_sweep(path, spring_scale=1.0, lo=30.0, hi=100.0, mass=0.0):
             n = int(abs(math.radians(a1 - a0)) / v / dt)
             for k in range(n):
                 g = math.radians(a0) + math.copysign(v * dt * k, a1 - a0)
-                y = spring_nm(g, spring_scale) - rig_grav(g)
+                y = y_fn(g) if y_fn else spring_nm(g, spring_scale) - rig_grav(g)
+                f_slide = (f_fn(g) + bv * v) if f_fn else f_const
                 iq = (-y + (-f_slide if phase == 'down' else f_slide)) / KT
                 w.writerow([f"{t:.4f}", dt, f"{g:.6f}", f"{g + rng.gauss(0, POS_NOISE):.6f}",
                             0.0, f"{iq + rng.gauss(0, 0.02):.5f}", phase])
@@ -317,7 +388,10 @@ def invoke(fake, argv, clock, typed='GO', rt=True):
     n0 = len(fake.writes)
     RUNS.clear()
     sched = os.SCHED_FIFO if rt else os.SCHED_OTHER
+    # _git stubbed: subprocess waits with time.sleep (patched = simulated) while timing
+    # out on the real clock, so a slow git under CPU load would jump simulated time.
     with mock.patch.object(hb, 'BearInterface', factory), \
+            mock.patch.object(hb, '_git', lambda *argv: 'test'), \
             mock.patch.object(hb, 'LOG_SUBDIR', logdir), \
             mock.patch.object(os, 'sched_getscheduler', return_value=sched), \
             mock.patch.object(time, 'monotonic', clock.monotonic), \
@@ -916,12 +990,218 @@ def main():
     res = invoke(fake, bare_args(sweep, '--thermal', '--thermal-s', '30', '--idle-s', '60'), clock)
     check("Ctrl-C during idle -> interrupted, ZERO writes, log saved",
           'interrupted' in (end_line(res) or '') and not res['writes'], end_line(res) or '')
+
+    # STATE 8 #33: a failed idle read is skipped and counted, not an abort
+    def idle_fails(fail_at, raise_at=(), alter=None):
+        """Bulk reads number 1.. during the run; fail (or raise) at these numbers.
+        alter = {number: fn(values, err) -> (values, err)} changes a read that answers."""
+        clock = Clock()
+        fake = FakeBear(clock)
+        n = []
+
+        def br(ids, regs, _o=fake.bulk_read):
+            n.append(1)
+            if len(n) in raise_at:
+                fake._comm()
+                raise struct.error('unpack requires a buffer of 4 bytes')
+            if fail_at(len(n)):
+                clock.advance(3 * 0.002)
+                return [([None] * len(regs), None) for _ in ids]
+            if alter and len(n) in alter:
+                return [alter[len(n)](*r) for r in _o(ids, regs)]
+            return _o(ids, regs)
+        fake.bulk_read = br
+        return invoke(fake, bare_args(sweep, '--thermal', '--thermal-s', '30', '--idle-s', '60'),
+                      clock), n
+
+    def fail_line(res):
+        return next((l for l in (res['csv']['comments'] if res['csv'] else [])
+                     if l.startswith('# idle failed reads')), '')
+    # preflight does a few bulk reads first; idle reads start after them
+    res, n = idle_fails(lambda k: k == 40)
+    dd = rows_np(res) if res['csv'] else None
+    n_idle = int((dd['phase'] == 'idle').sum()) if dd is not None else 0
+    check("one failed idle read: skipped, run completes, idle rows one short (299 of 300)",
+          res['rc'] == 0 and n_idle == 299, f"{end_line(res)}; idle rows {n_idle}")
+    check("...the header names it with its time", fail_line(res).startswith('# idle failed reads: 1 at t = '),
+          fail_line(res))
+    first_write = min(w[0] for w in res['writes']) if res['writes'] else None
+    check("...still no write of any kind during the idle log, then the normal run",
+          first_write is not None and first_write >= 1000.0 + dd['t'][dd['phase'] == 'idle'].max() - 1e-6)
+    if res['rc'] == 0:
+        common_after_enable(res, "  [idle, 1 failed read]")
+    res, n = idle_fails(lambda k: False, raise_at=(50,))
+    check("PyBEAR raising struct.error on an idle read: counted as a failed read, run completes",
+          res['rc'] == 0 and fail_line(res).startswith('# idle failed reads: 1 '), fail_line(res))
+    res, n = idle_fails(lambda k: 40 <= k < 44)
+    check("4 failed in a row: completes", res['rc'] == 0 and 'reads: 4 ' in fail_line(res), fail_line(res))
+    res, n = idle_fails(lambda k: 40 <= k < 45)
+    el = end_line(res) or ''
+    check("5 failed in a row: stops, ZERO writes, says so", '5 failed reads in a row' in el
+          and not res['writes'], el[:100])
+    res, n = idle_fails(lambda k: k > 30 and k % 4 == 0)
+    el = end_line(res) or ''
+    check("25 scattered failures: stops, ZERO writes", '25 in all' in el and not res['writes'], el[:100])
+    res_clean, clean = idle_fails(lambda k: False)
+    n_last = len(clean)                      # bulk_read is only used by preflight + idle: the last idle read
+    check("a clean idle log adds 'idle failed reads: 0' to the header",
+          fail_line(res_clean) == '# idle failed reads: 0', fail_line(res_clean))
+    res, n = idle_fails(lambda k: k >= n_last - 1)
+    el = end_line(res) or ''
+    check("log ends on failures and the actuator still doesn't answer: no arming, ZERO writes",
+          'not answering at arming' in el and not res['writes'] and len(n) == n_last + 1,
+          f"{el[:100]}; reads {len(n)} (clean {n_last})")
+    res, n = idle_fails(lambda k: k == n_last)
+    check("log ends on ONE failure, the fresh read answers: arms and completes",
+          res['rc'] == 0 and len(n) == n_last + 1 and 'reads: 1 ' in fail_line(res),
+          f"{end_line(res)}; {fail_line(res)}")
+    # ...and the fresh read gets the same checks as every idle read (review Nov 4)
+    for why, fn, word in [
+            ('arm off the stop', lambda v, e: ([math.radians(100.0)] + v[1:], e), 'left the top stop'),
+            (f'temperature >= TEMP_WARN ({hb.TEMP_WARN} C)',
+             lambda v, e: (v[:3] + [hb.TEMP_WARN + 0.5, v[4]], e), 'temperature'),
+            ('error byte 0x90', lambda v, e: (v, 0x90), 'error byte 0x90')]:
+        res, n = idle_fails(lambda k: k == n_last, alter={n_last + 1: fn})
+        el = end_line(res) or ''
+        check(f"log ends on a failure, the fresh read answers with {why}: ABORT before arming, "
+              f"ZERO writes", 'fresh read before arming' in el and word in el and not res['writes']
+              and len(n) == n_last + 1 and 'reads: 1 ' in fail_line(res),
+              f"{el[:110]}; writes {len(res['writes'])}")
     ok_parse = True
     try:
         hb.parse_args(['--sweep', sweep, '--thermal', '--thermal-s', '1800'])
     except SystemExit:
         ok_parse = False
     check("--thermal-s 1800 accepted (was 600 max)", ok_parse)
+
+    print("\n12. Level 2 rig (STATE 8 #31): measured y / friction / heating, adjustable static excess")
+    sweep_l2 = os.path.join(tmp, 'sweep_l2.csv')
+    make_sweep(sweep_l2, lo=60, hi=100, y_fn=l2_y, f_fn=l2_fc, bv=L2_BV)
+    tab_l2 = ST.sweep_tables(sweep_l2)
+    errs = [abs(r[2] - l2_y(math.radians(r[0] - PHI_DEG))) for r in tab_l2]
+    # 0.05, not 0.03: the L2 curve is piecewise linear with kinks; 5-deg bin means across a
+    # kink differ from the curve at the bin's mean angle by ~0.03
+    check("L2 fake sweep: sweep_tables y within 0.05 N m of the fake's y", max(errs) < 0.05,
+          f"max {max(errs):.3f}")
+    L2_ARGS = ('--angles', '90,80,70', '--i-max', '8.5')          # the Oct 29 H1 L2 command
+
+    def l2_run(*extra, up=0.0, down=0.0, J=0.015, angles=L2_ARGS):
+        clock = Clock()
+        fake = l2_fake(clock, J=J, gap_up=up, gap_down=down)
+        return invoke(fake, bare_args(sweep_l2, *angles, *extra), clock), fake
+
+    def l2_creep(res, k, deg):
+        d = rows_np(res)
+        m = (d['aidx'] == k) & (d['phase'] == 'creep')
+        if m.sum() < 600 or d['t'][m].max() - d['t'][m].min() < 6:
+            return None, None
+        u, amp = creep_avg(d, k)
+        return u + l2_y(math.radians(deg)), amp
+
+    def quick(res, deg):
+        return next((l for l in res['csv']['comments'] if l.startswith(f'# quick: {deg} deg')), '')
+
+    res, fake = l2_run()
+    check("L2, no static excess: Oct 29 command completes", res['rc'] == 0, end_line(res) or '')
+    for k, deg in enumerate((90, 80, 70)):
+        e, amp = l2_creep(res, k, deg)
+        check(f"L2 no excess, {deg} deg: creep within 0.05 N m, slid (amp >= 0.8, not STUCK)",
+              e is not None and abs(e) < 0.05 and amp >= 0.8 and 'STUCK' not in quick(res, deg)
+              and 'last cycle p-p' in quick(res, deg), f"err {e}, amp {amp}; {quick(res, deg)[-40:]}")
+    common_after_enable(res, "  [L2 no excess]", cap=7.8, raised=True)
+
+    res, fake = l2_run(up=0.25)
+    e70, amp70 = l2_creep(res, 2, 70)
+    e80, _ = l2_creep(res, 1, 80)
+    check("L2, 0.25 N m upward static excess (72-80 deg band): completes; 80 deg still reads "
+          "within 0.05, 70 deg is biased low by > 0.1 (Oct 29: -0.42) -- friction beats the creep",
+          res['rc'] == 0 and e80 is not None and abs(e80) < 0.05 and e70 is not None and e70 < -0.1,
+          f"80: {e80}; 70: {e70} (amp {amp70})")
+
+    res, fake = l2_run(up=0.47)
+    el = end_line(res) or ''
+    big = [b for b in fake.breakaways if b[2] > 1.75]
+    check("L2, 0.47 N m upward excess (the Oct 29 breakaway: net 1.81 N m): the arm breaks free "
+          "upward at > 1.75 N m net near 70 deg and the run ABORTS (target / speed)",
+          big and 65 < big[0][1] < 75 and ('from the target' in el or 'speed' in el),
+          f"{[(round(b[1], 1), round(b[2], 2)) for b in big[:2]]}; {el[:60]}")
+    common_after_enable(res, "  [L2 breakaway abort]", cap=7.8, raised=True)
+    lw = [w[2] for w in res['writes'] if w[1] == 'limit_i_max']
+    check("  [L2 breakaway abort]: limit_i_max raised to 8.5, then restored to 5.5 after the "
+          "confirmed disable", lw == [8.5, 5.5], str(lw))
+
+    print("\n13. --creep-scale-f (step 3): creep amplitude follows the sweep's friction")
+    for argv, why in [(bare_args(sweep, '--creep-scale-f', '0.3'), '--creep-scale-f below 0.5'),
+                      (bare_args(sweep, '--creep-scale-f', '2.5'), '--creep-scale-f above 2'),
+                      (bare_args(sweep, '--creep-scale-f', 'nan'), '--creep-scale-f NaN')]:
+        clock = Clock()
+        res = invoke(FakeBear(clock), argv, clock)
+        check(f"refused: {why}", str(res['rc']).startswith('SystemExit') and res['ports'] == 0
+              and not res['writes'], str(res['rc'])[:80])
+    res, fake = l2_run('--creep-scale-f', '1.0')
+    hdr = next((l for l in res['csv']['comments'] if 'creep amplitude per angle' in l), '')
+    f70 = ST.interp_inside(tab_l2, 70 + PHI_DEG, 1)
+    f90 = ST.interp_inside(tab_l2, 90 + PHI_DEG, 1)
+    check("header lists each angle's amplitude = 1.0 x f/1.0 (70 deg bigger than 90 deg)",
+          f"70 deg {f70:.2f}" in hdr and f"90 deg {f90:.2f}" in hdr and f70 > f90 + 0.1,
+          hdr[:150])
+    e90, a90 = l2_creep(res, 0, 90)
+    e70, a70 = l2_creep(res, 2, 70)
+    check("no excess: completes; the arm creeps more at 70 than at 90 deg; both within 0.05 N m",
+          res['rc'] == 0 and a70 > a90 + 0.1 and abs(e70) < 0.05 and abs(e90) < 0.05,
+          f"amp 90 {a90:.2f} / 70 {a70:.2f}; err {e90:+.3f} / {e70:+.3f}")
+    res_d, _ = l2_run(up=0.25, down=0.25, angles=('--angles', '70', '--i-max', '8.5'))
+    res_s, _ = l2_run('--creep-scale-f', '1.0', up=0.25, down=0.25,
+                      angles=('--angles', '70', '--i-max', '8.5'))
+    e_s, a_s = l2_creep(res_s, 0, 70)
+    check("0.25 N m excess both ways at 70 deg: the default 1 deg creep aborts, the scaled one "
+          "(1.35 deg) completes and reads within 0.1 N m",
+          res_d['rc'] != 0 and res_s['rc'] == 0 and e_s is not None and abs(e_s) < 0.1,
+          f"default: {(end_line(res_d) or '')[:45]}; scaled: {(end_line(res_s) or '')[:20]} err {e_s}")
+    common_after_enable(res_s, "  [scaled creep]", cap=7.8, raised=True)
+    res, _ = l2_run('--creep-scale-f', '1.0', up=0.47, angles=('--angles', '70', '--i-max', '8.5'))
+    check("0.47 N m upward excess: the scaled creep still aborts (the overshoot is set by "
+          "gap^2 / (J x rate limit), not the creep) -- and ends safely",
+          res['rc'] != 0 and any(w in (end_line(res) or '') for w in ('from the target', 'speed')),
+          end_line(res) or '')
+    common_after_enable(res, "  [scaled creep, 0.47 excess]", cap=7.8, raised=True)
+    a_hi = hb.parse_args(bare_args(sweep_l2, '--angles', '90,70', '--i-max', '8.5',
+                                   '--creep-scale-f', '0.5', '--creep-deg', '1.0'))
+    a_lo = hb.parse_args(bare_args(sweep_l2, '--angles', '90,70', '--i-max', '8.5',
+                                   '--creep-scale-f', '2.0', '--creep-deg', '0.6'))
+    check("scaled amplitudes are kept inside 0.5-2 deg (F0 0.5 -> 2.0 cap; F0 2 x 0.6 deg -> 0.5 floor)",
+          a_hi.creep_amps == [2.0, 2.0] and a_lo.creep_amps == [0.5, 0.5],
+          f"{a_hi.creep_amps} / {a_lo.creep_amps}")
+    a_th = hb.parse_args(bare_args(sweep, '--thermal', '--creep-scale-f', '1.0'))
+    check("--thermal ignores --creep-scale-f (no creep)", a_th.creep_amps is None)
+    clock = Clock()
+    res = invoke(FakeBear(clock), bare_args(sweep), clock)
+    check("default (no --creep-scale-f): header says --creep-deg at every angle; quick lines "
+          "carry 'last cycle p-p'", any('creep amplitude: --creep-deg at every angle' in l
+                                          for l in res['csv']['comments'])
+          and all('last cycle p-p' in quick(res, int(d)) for d in hb.DEFAULT_ANGLES))
+
+    # STUCK marker: friction far above anything the hold can push, only while the creep runs
+    clock = Clock()
+    fake = FakeBear(clock)
+
+    def stick_in_creep(x):
+        run = RUNS[-1] if RUNS else None
+        x.max_fric_override = 6.0 if (run is not None and getattr(run, '_phase_now', '') == 'creep') else None
+    orig_log = hb.Run.log
+
+    def log_spy(self, row):
+        self._phase_now = hb.PHASES[int(row[2])]
+        return orig_log(self, row)
+    hb.Run.log = log_spy
+    fake.on_bulk_rw = stick_in_creep
+    try:
+        res = invoke(fake, bare_args(sweep, '--angles', '80'), clock)
+    finally:
+        hb.Run.log = orig_log
+    q = quick(res, 80)
+    check("an arm that cannot slide during the creep: quick line says STUCK",
+          'STUCK' in q, q[-70:])
 
     print("\n9. hold_law is pure and bounded")
     u, I = hb.hold_law(0.01, 0.0, 0.0, 0.002, 40, 60, 1.5)
