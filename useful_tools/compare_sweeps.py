@@ -16,7 +16,12 @@ uses sweep_tables() (same bins and rules as the hold scripts), then prints:
        offset = mean change (the whole curve moved up or down) and
        shape  = RMS left after removing that offset (the curve bent);
   5. current peaks per sweep (|iq| max, and the highest "lowest of 3 in a row",
-     which is what the 5.0 A x3 abort sees).
+     which is what the x3 abort sees), against THAT sweep's own limits:
+     observer_excitation.py aborts at i_max - 0.5 A for 3 samples and trips at
+     i_max - 0.2 A. i_max comes from the header's 'i_max=' (since Oct 28), else
+     the 'limit_i_max=set/read' read-back, else the 5.5 A default; the source is
+     printed. (Until Oct 29 this column assumed 5.0 A for every sweep and showed
+     -2.86 A for an 8.5 A run; STATE 8 #32.)
 
 Why the split in 4: a uniform offset could be corrected from one reading (e.g. one
 hold); a change in shape could not.
@@ -34,6 +39,10 @@ from sweep_tables import (sweep_tables, merge_sweeps, read_csv, fnum,   # noqa: 
 from main_controller.controller import PHI_DEG                          # noqa: E402
 
 TS = re.compile(r'(\d{8})_(\d{6})')
+I_MAX_DEFAULT = 5.5                 # observer_excitation.py's limit_i_max without --i-max
+ABORT_BELOW, TRIP_BELOW = 0.5, 0.2  # its abort (x3) and trip, below i_max
+RE_IMAX = re.compile(r'\bi_max=([0-9.]+)')
+RE_READBACK = re.compile(r'\blimit_i_max=([0-9.]+)/([0-9.]+)')
 
 
 def label(path):
@@ -57,12 +66,25 @@ def keyed(table):
     return {int(round(r[0] / BIN_DEG) * BIN_DEG): r for r in table}
 
 
+def i_max_of(comments):
+    """(i_max in A, where it came from) for one sweep's header."""
+    for line in comments:
+        m = RE_IMAX.search(line)
+        if m:
+            return float(m.group(1)), 'header'
+    for line in comments:
+        m = RE_READBACK.search(line)
+        if m:
+            return float(m.group(1)), 'readback'
+    return I_MAX_DEFAULT, 'default'
+
+
 def peaks(path):
-    _, rows = read_csv(path)
+    comments, rows = read_csv(path)
     a = [abs(fnum(r['present_iq'])) for r in rows if r.get('phase') != 'park']
     a = [x for x in a if x == x]
     run3 = max(min(a[i:i + 3]) for i in range(len(a) - 2)) if len(a) >= 3 else float('nan')
-    return max(a) if a else float('nan'), run3
+    return (max(a) if a else float('nan')), run3, i_max_of(comments)
 
 
 def report(paths):
@@ -103,11 +125,16 @@ def report(paths):
         out.append(f"{labs[j]:<14}{dy.mean():+10.3f}{np.sqrt(np.mean((dy - dy.mean()) ** 2)):10.3f}"
                    f"{df.mean():+10.3f}{np.sqrt(np.mean((df - df.mean()) ** 2)):10.3f}")
 
-    out.append("\nCurrent peaks (abort 5.0 A x3, trip 5.3 A)")
-    out.append(f"{'sweep':<14}{'max |iq|':>10}{'lowest-of-3':>13}{'margin x3':>11}")
+    out.append(f"\nCurrent peaks against each sweep's own limits (abort = i_max - {ABORT_BELOW:g} A x3, "
+               f"trip = i_max - {TRIP_BELOW:g} A)")
+    out.append(f"{'sweep':<14}{'i_max':>7}{'from':>10}{'max |iq|':>10}{'lowest-of-3':>13}"
+               f"{'abort x3':>10}{'margin x3':>11}{'trip':>7}{'margin trip':>13}")
     for p, l in zip(paths, labs):
-        mx, r3 = peaks(p)
-        out.append(f"{l:<14}{mx:10.2f}{r3:13.2f}{5.0 - r3:11.2f}")
+        mx, r3, (imax, src) = peaks(p)
+        ab, tr = imax - ABORT_BELOW, imax - TRIP_BELOW
+        out.append(f"{l:<14}{imax:7.2f}{src:>10}{mx:10.2f}{r3:13.2f}{ab:10.2f}{ab - r3:11.2f}"
+                   f"{tr:7.2f}{tr - mx:13.2f}")
+    out.append("(a negative margin means that limit was reached: the sweep aborted there)")
     return '\n'.join(out)
 
 
