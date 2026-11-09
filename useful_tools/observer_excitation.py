@@ -32,6 +32,17 @@ approach are still clamped to MIN_ANGLE..MAX_ANGLE; aborts and --i-max
 unchanged (5.5 A). The CSV header says no_spring=True; sweep_tables() refuses
 it unless asked (allow_no_spring), so a hold script can't use it as a spring table.
 
+--park auto|high|low (Nov 8): which stop to park toward before the release.
+auto (default) decides from the torque model below, which uses the Level 1
+spring table and puts the load on the arm line. With a load fitted that model
+can pick the wrong stop (Nov 8, Claude Code: a 1.137 kg plate at Level 2 would
+have parked LOW at 24 deg and sprung ~90 deg into the top stop), so a run with
+--arm-mass-kg > 0 must say --park high or --park low; auto is refused before the
+port opens. Choose from a same-session bare sweep: if spring - rig - load stays
+positive up to the top, the released arm rises, so --park high. The header
+records the choice and what the model would have said. --no-spring parks LOW
+and refuses --park high.
+
 --j-sine (Oct 15): the J sine test (fit_j_sine.py). Bare rig, small fast sines;
 raises limit_velocity_max to 2 rad/s and limit_acc_max to 30 rad/s^2 for that
 run only (see the J_SINE_* constants). Aborts and current limits unchanged.
@@ -60,12 +71,18 @@ Both modes park before disabling, toward the stop the arm goes to when
 released, chosen from the torque model at the low park angle:
 net = tau_spring - tau_gravity_total (controller.py, with the given load).
 net > 0 (spring wins) parks HIGH (PARK_HIGH_DEG); otherwise LOW (PARK_LOW_DEG,
-as validate_model.py). Net and the choice are printed before the port opens,
-again before the Enter prompt, and written to the CSV header. The park
-is monitored: it gives up and disables immediately (the arm may move) if
-|present_iq| > PARK_IQ_ABORT_A for PARK_IQ_COUNT consecutive samples, if the
-arm has not moved PARK_PROGRESS_DEG toward PARK_DEG within PARK_STALL_S, or at
-PARK_DEADLINE_S. Park samples are logged with phase='park'.
+as validate_model.py), unless --park overrides it. Net and the choice are
+printed before the port opens, again before the Enter prompt, and written to
+the CSV header. The park ends only when the ARM is within PARK_ARRIVE_DEG of
+PARK_DEG (Nov 8, STATE 8 #25: it used to end when the goal got there, so a
+lagging arm was released mid-range and logged as "parked"). It is monitored and
+releases at once (the arm may move) if |present_iq| > PARK_IQ_ABORT_A for
+PARK_IQ_COUNT consecutive samples or > IQ_TRIP_A on one sample, the arm has
+not moved PARK_PROGRESS_DEG toward PARK_DEG within PARK_STALL_S, the arm is
+still more than PARK_ARRIVE_DEG away PARK_ARRIVE_S after the goal got there,
+or at PARK_DEADLINE_S. Every early release is written to the CSV with its
+reason; an error byte seen during the park is logged, not released on (the run
+usually ended because of it). Park samples are logged with phase='park'.
 
 --soft-start-s sets the ramp time at each end of a constant-velocity leg. In
 sweep mode the constant-velocity span of each leg is printed before the port
@@ -179,6 +196,9 @@ _ap.add_argument('--j-sine', action='store_true',
                       f'{J_SINE_MAX_AMP_DEG:g} deg, centre {J_SINE_CENTER_MIN_DEG:g}-'
                       f'{J_SINE_CENTER_MAX_DEG:g} deg, <= {J_SINE_MAX_FREQ_HZ:g} Hz; '
                       'raises limit_velocity_max / limit_acc_max for this run only')
+_ap.add_argument('--park', choices=('auto', 'high', 'low'), default='auto',
+                 help='stop to park toward before the release: auto (torque model; '
+                      'bare rig only), high or low (required with a load)')
 _args = _ap.parse_args()
 
 if not SAFETY_CHECKS_CONFIRMED:
@@ -205,6 +225,13 @@ if NO_SPRING:
         _ap.error("--no-spring is for the bare rig only (--arm-mass-kg 0)")
     if _args.i_max != I_MAX_DEFAULT:
         _ap.error("--no-spring keeps --i-max at its default (5.5 A)")
+    if _args.park == 'high':
+        _ap.error("--no-spring parks LOW (the released arm drops); --park high refused")
+if _args.arm_mass_kg > 0 and _args.park == 'auto':
+    _ap.error("a load is fitted (--arm-mass-kg > 0): give --park high or --park low. "
+              "The auto choice uses the Level 1 spring table and an on-axis load and "
+              "can pick the wrong stop (Nov 8). Pick from a same-session bare sweep: "
+              "spring - rig - load > 0 up to the top -> high.")
 _BOTTOM_MIN = NO_SPRING_BOTTOM_MIN_DEG if NO_SPRING else 30.0
 if not _BOTTOM_MIN <= _args.bottom_deg <= 60.0:
     _ap.error(f"--bottom-deg must be {_BOTTOM_MIN:g}-60 deg")
@@ -315,15 +342,20 @@ if PARK_SPRING_NM is None:
                      f"outside TAU_SPRING_TABLE; cannot choose a park direction.")
 PARK_GRAVITY_NM = tau_gravity_total(PARK_LOW_VEST_DEG, ARM_MASS_KG, ARM_COM_M)
 PARK_NET_NM = PARK_SPRING_NM - PARK_GRAVITY_NM
-if PARK_NET_NM > 0:
+PARK_MODEL = 'HIGH' if PARK_NET_NM > 0 else 'LOW'      # what the torque model says
+PARK_CHOICE = PARK_MODEL if _args.park == 'auto' else _args.park.upper()
+if PARK_CHOICE == 'HIGH':
     PARK_DEG, PARK_DIR = PARK_HIGH_DEG, +1.0
     PARK_WHY = "spring wins at the low park, a released arm RISES into the top stop"
 else:
     PARK_DEG, PARK_DIR = PARK_LOW_DEG, -1.0
     PARK_WHY = ("no spring installed" if NO_SPRING else "load wins at the low park") + \
         ", a released arm DROPS into the bottom stop"
+if _args.park != 'auto':
+    PARK_WHY = (f"chosen with --park {_args.park} (the torque model said {PARK_MODEL}; "
+                f"it uses the Level 1 table and an on-axis load)")
 PARK_SUMMARY = (
-    f"{'HIGH' if PARK_DIR > 0 else 'LOW'} at {PARK_DEG:.0f} deg -- net = "
+    f"{PARK_CHOICE} at {PARK_DEG:.0f} deg -- net = "
     f"tau_spring {PARK_SPRING_NM:.3f} - tau_gravity {PARK_GRAVITY_NM:.3f} = "
     f"{PARK_NET_NM:+.3f} Nm at act {PARK_LOW_DEG:.0f} / vest "
     f"{PARK_LOW_VEST_DEG:.0f} deg ({ARM_MASS_KG} kg @ {ARM_COM_M} m): {PARK_WHY}")
@@ -334,6 +366,9 @@ PARK_IQ_ABORT_A = IQ_ABORT_A  # A (5.0 default), release if |present_iq| exceeds
 PARK_IQ_COUNT = 3            # ...for this many consecutive samples
 PARK_PROGRESS_DEG = 1.0      # deg toward PARK_DEG that must happen...
 PARK_STALL_S = 2.0           # ...within this long, or release
+PARK_ARRIVE_DEG = 3.0        # the ARM must be this close to PARK_DEG to count as parked
+                             # (Level 2 bare parks stopped 1.8-2.5 deg short of 110)...
+PARK_ARRIVE_S = 5.0          # ...within this long after the goal got there, or release
 
 # --- Loop timing --------------------------------------------------------------
 LOOP_PERIOD_S = 0.005        # 200 Hz target; actual spacing is logged as loop_dt
@@ -616,16 +651,21 @@ def park_and_disable(f, writer):
     release is a short move into that stop. Runs on every exit path once
     enable was attempted. If the arm is already at or past PARK_DEG in
     PARK_DIR it releases directly -- driving it back would only lengthen the
-    move into the stop. The park is monitored and disables IMMEDIATELY --
-    the arm may move into its stop -- if:
+    move into the stop. Parked means the ARM is within PARK_ARRIVE_DEG of
+    PARK_DEG, not just the goal (STATE 8 #25). The park is monitored and
+    disables IMMEDIATELY -- the arm may move into its stop -- if:
       * |present_iq| > PARK_IQ_ABORT_A for PARK_IQ_COUNT consecutive samples,
+      * |present_iq| > IQ_TRIP_A on one sample,
       * the arm has not moved PARK_PROGRESS_DEG toward PARK_DEG in PARK_STALL_S,
+      * the goal is at PARK_DEG but the arm is still more than PARK_ARRIVE_DEG
+        away after PARK_ARRIVE_S,
       * PARK_DEADLINE_S passes,
       * a read/write fails (a comm failure may be why we are exiting), or
       * Ctrl-C arrives mid-park.
     Samples are logged with phase='park' when a log is open."""
     release = None
     parked = False
+    park_err = None                   # first error byte != 128 seen during the park
     try:
         pos, vel, iq, _ = read()
         target = math.radians(PARK_DEG)
@@ -644,23 +684,47 @@ def park_and_disable(f, writer):
             deadline = now + PARK_DEADLINE_S
             ref_pos, ref_t = pos, now     # progress-watchdog reference
             iq_over = 0
-            while (target - goal) * PARK_DIR > 0:
+            t_goal_there = None           # when the goal reached the target
+            while True:
                 now = time.monotonic()
                 dt = now - t_prev
                 t_prev = now
                 goal += PARK_DIR * PARK_VELOCITY * dt
-                if (goal - target) * PARK_DIR > 0:     # never step past target
+                if (goal - target) * PARK_DIR >= 0:    # never step past target
                     goal = target
                 iface.bear.set_goal_position((iface.id, goal))
-                pos, vel, iq, _ = read()
+                pos, vel, iq, err = read()
                 if writer is not None:
                     log_row(writer, now, goal, pos, vel, iq, 'park')
 
+                if err != 128 and park_err is None:
+                    # Logged, not a release: the run usually ended BECAUSE of an
+                    # error byte, and it persists. Releasing on it would turn every
+                    # error-byte abort into a spring-driven snap from mid-range; if
+                    # the firmware has really stopped (fault, ESTOP), the stall check
+                    # releases within PARK_STALL_S anyway.
+                    park_err = err
+                if abs(iq) > IQ_TRIP_A:
+                    release = (f"|present_iq| {abs(iq):.3f} A > {IQ_TRIP_A} A during park "
+                               f"(immediate trip)")
+                    break
                 iq_over = iq_over + 1 if abs(iq) > PARK_IQ_ABORT_A else 0
                 if iq_over >= PARK_IQ_COUNT:
                     release = (f"|present_iq| > {PARK_IQ_ABORT_A} A for "
                                f"{iq_over} consecutive samples during park")
                     break
+                if goal == target:
+                    if abs(target - pos) <= math.radians(PARK_ARRIVE_DEG):
+                        print(f"Parked (arm at {math.degrees(pos):.1f} deg).")
+                        parked = True
+                        break
+                    if t_goal_there is None:
+                        t_goal_there = now
+                    elif now - t_goal_there > PARK_ARRIVE_S:
+                        release = (f"arm did not arrive: {math.degrees(abs(target - pos)):.1f} "
+                                   f"deg short of {PARK_DEG:.0f} deg "
+                                   f"{PARK_ARRIVE_S:.0f}s after the goal got there")
+                        break
                 if (pos - ref_pos) * PARK_DIR > math.radians(PARK_PROGRESS_DEG):
                     ref_pos, ref_t = pos, now
                 elif now - ref_t > PARK_STALL_S:
@@ -672,9 +736,6 @@ def park_and_disable(f, writer):
                     release = f"park deadline {PARK_DEADLINE_S:.0f}s passed"
                     break
                 time.sleep(0.005)
-            else:
-                print("Parked.")
-                parked = True
     except Exception as e:
         release = f"park failed ({e})"
     finally:
@@ -688,7 +749,8 @@ def park_and_disable(f, writer):
         S['disabled_ok'] = iface.disable()
         if f is not None:
             try:
-                f.write(f"# PARK: {'released early -- ' + release if release else 'parked'}\n")
+                f.write(f"# PARK: {'released early -- ' + release if release else 'parked'}"
+                        f"{'' if park_err is None else f' (error byte {park_err} seen during the park)'}\n")
             except Exception:
                 pass
 
@@ -809,6 +871,8 @@ try:
             f"loop_period_s={LOOP_PERIOD_S} const_span_deg="
             f"{'' if CONST_SPAN_DEG is None else f'{CONST_SPAN_DEG:.1f}'}\n")
     f.write(f"# park: deg={PARK_DEG} dir={'up' if PARK_DIR > 0 else 'down'} "
+            f"park_arg={_args.park} model={PARK_MODEL} "
+            f"arrive={PARK_ARRIVE_DEG}deg/{PARK_ARRIVE_S}s "
             f"velocity={PARK_VELOCITY} "
             f"deadline_s={PARK_DEADLINE_S} iq_abort_a={PARK_IQ_ABORT_A}x"
             f"{PARK_IQ_COUNT} progress={PARK_PROGRESS_DEG}deg/{PARK_STALL_S}s "

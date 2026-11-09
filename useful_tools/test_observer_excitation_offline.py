@@ -46,10 +46,16 @@ Checks:
      goal jump, parks LOW at 10 deg, released arm drops to the stop without a Joint
      Limit latch; sweep_tables refuses the CSV by default and, when allowed, recovers
      a 1-deg friction bump and y = -rig gravity; an abort still ends disabled;
+  4d. (Nov 8) the plate counterweight sweep with --park high: a load with no --park
+     (or --park auto) is refused before the port opens; with --park high the run
+     parks HIGH although the torque model says LOW, the header records both, the arm
+     arrives within 3 deg and the released arm rises to the stop; bare runs unchanged;
   5. runtime aborts (current, trip, jam, error byte, temperature, run cap,
-     Ctrl-C) and every park release branch (park current, park stall, park
-     deadline, Ctrl-C in the park): each ends with a confirmed disable and
-     nothing written after it, and the CSV names the reason.
+     Ctrl-C) and every park release branch (park current, park one-sample trip,
+     park stall, arm not arriving within 3 deg 5 s after the goal (STATE 8 #25),
+     Ctrl-C in the park): each ends with a confirmed disable and nothing written
+     after it, and the CSV names the reason. An error byte during the park is
+     logged, not released on.
 A section that crashes is reported as a failed check; the others still run.
 Prints the write sequence of every path at the end.
 
@@ -93,6 +99,10 @@ REAL_BI = bi.BearInterface   # captured before any patching
 SCRIPT = os.path.join(HERE, 'observer_excitation.py')
 H0_ARGS = ['--mode', 'sweep', '--arm-mass-kg', '0', '--arm-com-m', '0',
            '--velocity', '0.10', '--soft-start-s', '0.3']
+# Nov 8: the plate counterweight sweep (Level 2, plate off the arm line), park forced HIGH.
+PL_ARGS = ['--mode', 'sweep', '--arm-mass-kg', '1.137', '--arm-com-m', '0.213',
+           '--velocity', '0.10', '--soft-start-s', '0.3', '--bottom-deg', '30',
+           '--i-max', '8.5', '--park', 'high']
 SETTING_NAMES = ['p_gain_iq', 'i_gain_iq', 'd_gain_iq', 'p_gain_id', 'i_gain_id',
                  'd_gain_id', 'p_gain_velocity', 'i_gain_velocity',
                  'd_gain_velocity', 'p_gain_position', 'i_gain_position',
@@ -242,7 +252,8 @@ class PosFake:
         elif self.te == 1 and r['mode'] == 2:
             # no setpoint-velocity feedforward: the real arm lags ~1.4 deg at 0.1 rad/s
             v_cmd = max(-vmax, min(vmax, POS_KP * (self.sp - self.pos)))
-            if self.slow_after and s is not None and s >= self.slow_after[0]:
+            if (self.slow_after and s is not None and s >= self.slow_after[0]
+                    and (len(self.slow_after) < 3 or s < self.slow_after[2])):
                 v_cmd = max(-self.slow_after[1], min(self.slow_after[1], v_cmd))
             acc = (v_cmd - self.vel) / VEL_TAU
             self.vel += acc * h
@@ -506,6 +517,9 @@ def section1():
         '--bottom-deg 61': H0_ARGS + ['--bottom-deg', '61'],
         '--bottom-deg with sine': ['--mode', 'sine', '--freq-hz', '0.3', '--arm-mass-kg', '0',
                                    '--arm-com-m', '0', '--bottom-deg', '45'],
+        'a load with no --park (auto is refused with a load, Nov 8)': PL_ARGS[:-2],
+        'a load with --park auto': PL_ARGS[:-1] + ['auto'],
+        '--park sideways (not a choice)': H0_ARGS + ['--park', 'sideways'],
     }
     for name, argv in bad.items():
         r = invoke(argv)
@@ -861,6 +875,60 @@ def section4b():
     ends_disabled(fake, "bottom 45")
 
 
+def pl_y(act):
+    """Level 2-like spring - rig - plate (Nov 8): y_nm + 2.0 N m of extra spring, minus a
+    plate whose torque is 1.88 sin(vest - 34 deg) (the fit to the Nov 8 holds). Positive
+    everywhere: the released arm rises, as Claude Code found for the real plate."""
+    vest = math.degrees(act) + PHI_DEG
+    return y_nm(act) + 2.0 - 1.88 * math.sin(math.radians(vest - 34.0))
+
+
+def section4d():
+    print("4d. Plate counterweight sweep, --park high (Nov 8): " + ' '.join(PL_ARGS))
+    clock = Clock()
+    fake = PosFake(clock, y_fn=pl_y)
+    r = invoke(PL_ARGS, fake, clock)
+    WRITE_LOG['4d. plate sweep --park high'] = compress(fake.writes, fake.calls)
+    check("completes, exit 0, CSV written", r['rc'] == 0 and r['csv'] is not None,
+          f"rc {str(r['rc'])[:200]}")
+    if not r['csv']:
+        print(r['out'][-3000:])
+        return
+    hdr = open(r['csv']).read()
+    check("the model alone would have parked LOW (the Nov 8 hazard) and the header says so",
+          'model=LOW' in hdr and 'park_arg=high' in hdr, [l for l in hdr.splitlines() if l.startswith('# park:')][0][:120])
+    check("printed and logged: HIGH at 110, chosen with --park high",
+          'Park: HIGH at 110' in r['out'] and 'chosen with --park high' in hdr)
+    seen, rows = phases(r['csv'])
+    park = [x for x in rows if x['phase'] == 'park']
+    check("phases approach -> down -> dwell -> up -> park", seen == ['approach', 'down', 'dwell', 'up', 'park'],
+          ' -> '.join(seen))
+    lo = min(math.degrees(float(x['pos'])) for x in rows)
+    check("sweep reaches ~30 deg", 29.5 < lo < 32.0, f"min {lo:.2f}")
+    at_release = math.degrees(fake.pos)
+    check("parks HIGH: last park goal 110, arm within 3 deg of it at the release",
+          park and abs(math.degrees(float(park[-1]['goal_pos'])) - 110.0) < 0.01
+          and abs(at_release - 110.0) <= 3.0, f"arm {at_release:.1f} deg")
+    fake.clock.advance(2.0)
+    check("released arm rises to the top stop (a short move), no Joint Limit latch",
+          abs(math.degrees(fake.pos) - 116.5) < 0.1 and fake.err == 0x80,
+          f"{math.degrees(fake.pos):.1f} deg, error {hex(fake.err)}")
+    a = [abs(float(x['present_iq'])) for x in rows if x['phase'] != 'park']
+    check("current stays under the 8.0 A x3 abort / 8.3 A trip", max(a) < 8.0, f"max {max(a):.2f} A")
+    check("CSV END: complete, PARK: parked", '# END: complete' in csv_end(r['csv'])
+          and '# PARK: parked' in csv_end(r['csv']), csv_end(r['csv']))
+    check("limit_i_max restored to 5.5 after the confirmed disable",
+          fake.writes[-1][1:] == ('limit_i_max', 5.5) and fake.te == 0, compress(fake.writes[-3:]))
+    os.remove(r['csv'])
+
+    # bare rig: --park auto is still allowed and still decides HIGH (unchanged behaviour)
+    r = run_h0('4d. bare, --park auto (default)')
+    check("bare rig, no --park: unchanged (auto -> HIGH), header park_arg=auto model=HIGH",
+          r['rc'] == 0 and r['csv'] is not None and 'park_arg=auto model=HIGH' in open(r['csv']).read())
+    if r['csv']:
+        os.remove(r['csv'])
+
+
 def section5():
     print("5. Runtime aborts: each parks or releases, then disables")
     cases = [
@@ -871,7 +939,7 @@ def section5():
         ('arm jams (tracking > 15 deg), park then stalls', dict(setup=lambda f: setattr(f, 'jam_after', 8.0)),
          1, 'diverged', 'released early -- no 1 deg of progress'),
         ('error byte 0x81 mid-run', dict(setup=lambda f: setattr(f, 'err_after', (12.0, 0x81))),
-         1, 'Error byte', 'parked'),
+         1, 'Error byte', 'parked (error byte 129 seen during the park)'),
         ('winding 76 C mid-run', dict(setup=lambda f: setattr(f, 'temp_after', (12.0, 76.0))),
          1, 'TEMP_MAX', 'parked'),
         ('Ctrl-C mid-run', dict(kbi=[12.0]), 130, 'Ctrl-C', 'parked'),
@@ -893,6 +961,9 @@ def section5():
          'released early -- |present_iq| > 5.0 A for 3 consecutive samples during park'),
         ('park stall (arm jams in the park)', dict(setup=lambda f: setattr(f, 'jam_after', 12.5)),
          'released early -- no 1 deg of progress'),
+        ('park one sample 5.4 A (immediate trip, Nov 8)',
+         dict(setup=lambda f: setattr(f, 'spike', (12.5, 1, -5.4))),
+         'A > 5.3 A during park (immediate trip)'),
     ]
     for name, kw, want in park_cases:
         r = run_h0(f"5. park release: {name}", kbi=[12.0], **kw)
@@ -904,19 +975,36 @@ def section5():
         if r['csv']:
             os.remove(r['csv'])
 
-    # Park deadline: UNREACHABLE. The park loop ends when the GOAL reaches 110 deg
-    # (<= ~12 s of goal travel at 0.15 rad/s), not the arm, so the 20 s deadline
-    # never fires. An arm that crawls (> 1 deg / 2 s, so no stall) is released
-    # far from the target and the CSV says "parked". Documented, not endorsed:
-    r = run_h0("5. NOTE park with a crawling arm (0.8 deg/s)",
+    # STATE 8 #25 (fixed Nov 8): the park used to end when the GOAL reached 110 deg, so an
+    # arm that crawls (> 1 deg / 2 s, no stall) was released far below the target and the
+    # CSV said "parked". Now the arm must arrive within 3 deg, 5 s after the goal does.
+    r = run_h0("5. park with a crawling arm (0.8 deg/s)",
                setup=lambda f: setattr(f, 'slow_after', (12.0, math.radians(0.8))), kbi=[12.0])
     fake = r['fake']
     end = csv_end(r['csv']) if r['csv'] else ''
     rel = math.degrees(fake.pos)
-    check("NOTE: crawling arm -> park reports 'parked' with the arm far below 110 deg "
-          "(park deadline is unreachable)", 'PARK: parked' in end and rel < 80.0,
-          f"arm at release {rel:.1f} deg; {end[-40:]}")
+    check("crawling arm (#25 fix): never 'parked'; released with 'arm did not arrive', the "
+          "shortfall and the 5 s wait in the CSV", 'PARK: released early -- arm did not arrive' in end
+          and 'deg short of 110 deg 5s after the goal got there' in end and rel < 80.0,
+          f"arm at release {rel:.1f} deg; {end[-90:]}")
     ends_disabled(fake, "crawling-arm park")
+    if r['csv']:
+        os.remove(r['csv'])
+
+    # an arm that is held back, then catches up within the 5 s, still parks
+    r = run_h0("5. park, arm held back to 0.8 deg/s until 20 s, then free",
+               setup=lambda f: setattr(f, 'slow_after', (12.0, math.radians(0.8), 20.0)), kbi=[12.0])
+    fake = r['fake']
+    end = csv_end(r['csv']) if r['csv'] else ''
+    last = None
+    if r['csv']:
+        _, rows = phases(r['csv'])
+        park = [x for x in rows if x['phase'] == 'park']
+        last = math.degrees(float(park[-1]['pos'])) if park else None
+    check("arm catches up within 5 s of the goal: 'parked', last park sample within 3 deg of 110",
+          'PARK: parked' in end and 'released early' not in end and last is not None
+          and abs(last - 110.0) <= 3.0, f"last park pos {last}; {end[-50:]}")
+    ends_disabled(fake, "late-arriving park")
     if r['csv']:
         os.remove(r['csv'])
 
@@ -1027,7 +1115,8 @@ def section4c():
     for extra, why in ((['--mode', 'sine', '--freq-hz', '0.3'], 'sine'),
                        (['--arm-mass-kg', '1.5', '--arm-com-m', '0.27'], 'a load'),
                        (['--i-max', '7'], '--i-max 7'),
-                       (['--bottom-deg', '19'], '--bottom-deg 19')):
+                       (['--bottom-deg', '19'], '--bottom-deg 19'),
+                       (['--park', 'high'], '--park high')):
         a = list(NS_ARGS)
         for i in range(0, len(extra), 2):
             if extra[i] in a:
@@ -1146,7 +1235,7 @@ def section4c():
 
 def main():
     import traceback
-    for sec in (section1, section2, section3, section4, section4b, section4c, section5):
+    for sec in (section1, section2, section3, section4, section4b, section4c, section4d, section5):
         try:
             sec()
         except Exception:
