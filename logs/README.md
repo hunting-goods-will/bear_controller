@@ -22,6 +22,38 @@ Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, n
 folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
 Paths are under `logs/`.
 
+### 2026-11-08 (spring not recorded in the files)
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_bare_20261108_162028.csv.gz` | H0 sweep | i_max 5.5, bottom_deg 30 | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_bare_20261108_162210.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_bare_20261108_164845.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_bare_20261108_181155.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60, soft_start 0.3 s | complete; parked | not recorded |
+| `phase2/hold_bench/hold_bench_20261108_182610.csv.gz` | H1 bare | i_max 8.5, angles [95, 88, 80], creep 1 deg | completed | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_182758.csv.gz` | H1 bare | same as above | ABORT: exchange failed (all retries used) | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_183104.csv.gz` | H1 bare | same as above | completed | 71ee7ae clean |
+| `phase2/stiff_band/stiff_band_id1_20261108_161512.csv.gz` | stiff-band readout (read-only) | no label | - | - |
+| `phase2/config/config_dump_id1_20261108_161356.json.gz` | actuator config dump | - | - | - |
+
+### 2026-11-07
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_bare_20261107_232523.csv.gz` | H0 sweep | i_max 5.5, bottom_deg 30 | complete; PARK: released early (\|present_iq\| > 5.0 A during park) | not recorded |
+| `phase2/observer_csvs/observer_sweep_bare_20261107_232707.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_bare_20261107_234129.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
+| `phase2/stiff_band/stiff_band_id1_20261107_231802.csv.gz` | stiff-band readout (read-only) | "healthy unit, new bracket, no spring" | - | - |
+| `phase2/config/config_dump_id1_20261107_225704.json.gz`, `..._231542.json.gz` | actuator config dumps | - | - | - |
+
+### 2026-11-05
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/comms/comms_soak_read_20261105_144512.csv.gz` (+ `_detail`) | comms soak, read-only, RT | 30 min, COMM_TRY_NUM 3 | completed | 4c00bb7 clean |
+| `phase2/stiff_band/stiff_band_id1_20261105_194834.csv.gz` | stiff-band readout (read-only) | "sticky, bench, free flange" | - | - |
+| `phase2/config/config_dump_id1_20261105_194107.json.gz` | actuator config dump | - | - | - |
+
 ### 2026-10-29
 
 | File | Run type | Spring | Key arguments | Outcome | git | Summaries | Run notes |
