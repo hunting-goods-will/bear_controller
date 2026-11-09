@@ -30,6 +30,14 @@ Paths are under `logs/`.
 | `phase2/observer_csvs/observer_sweep_bare_20261108_162210.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
 | `phase2/observer_csvs/observer_sweep_bare_20261108_164845.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
 | `phase2/observer_csvs/observer_sweep_bare_20261108_181155.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60, soft_start 0.3 s | complete; parked | not recorded |
+| `phase2/hold_bench/hold_bench_20261108_185136.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | ABORT: -5.0 deg from the target | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_185329.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | completed | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_185534.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | completed | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_185905.csv.gz` | H1 bare | i_max 8.5, angles [95, 80], creep_cycles 6 | completed | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_190949.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | interrupted (Ctrl-C) | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_191309.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | ABORT: exchange failed (all retries used) | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_191321.csv.gz` | refusal (H2 payload) | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | REFUSED/FAILED: enable refused: goal_iq reads -3.397, not 0 | 71ee7ae clean |
+| `phase2/hold_bench/hold_bench_20261108_191718.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | completed | 71ee7ae clean |
 | `phase2/hold_bench/hold_bench_20261108_182610.csv.gz` | H1 bare | i_max 8.5, angles [95, 88, 80], creep 1 deg | completed | 71ee7ae clean |
 | `phase2/hold_bench/hold_bench_20261108_182758.csv.gz` | H1 bare | same as above | ABORT: exchange failed (all retries used) | 71ee7ae clean |
 | `phase2/hold_bench/hold_bench_20261108_183104.csv.gz` | H1 bare | same as above | completed | 71ee7ae clean |
