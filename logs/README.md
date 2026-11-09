@@ -37,6 +37,8 @@ Aborted, interrupted and refused hold-bench runs from this day were deleted (Sam
 | `phase2/hold_bench/hold_bench_20261108_185905.csv.gz` | H1 bare | i_max 8.5, angles [95, 80], creep_cycles 6 | completed | 71ee7ae clean |
 | `phase2/hold_bench/hold_bench_20261108_191718.csv.gz` | H2 payload | i_max 8.5, angles [95, 88, 80], payload 1.137 kg r 0.213 m angle 0.0 | completed | 71ee7ae clean |
 | `phase2/observer_csvs/observer_sweep_wrench_20261108_195616.csv.gz` | H0 sweep, 1.137 kg plate | i_max 8.5, bottom_deg 30, --park high (model said LOW) | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_wrench_20261108_201818.csv.gz` | H0 sweep, 1.137 kg plate | i_max 10, bottom_deg 45, --park high | complete; parked | 9be7286 (script) |
+| `phase2/hold_bench/hold_bench_20261108_202309.csv.gz` | H1 bare | i_max 8.5, angles [95, 80], creep 1 deg at 0.5 Hz x10 cycles | completed | 9be7286 clean |
 | `phase2/hold_bench/hold_bench_20261108_193156.csv.gz` | H1 bare | i_max 8.5, angles [88], creep_cycles 6 | completed | 71ee7ae clean |
 | `phase2/hold_bench/hold_bench_20261108_182610.csv.gz` | H1 bare | i_max 8.5, angles [95, 88, 80], creep 1 deg | completed | 71ee7ae clean |
 | `phase2/hold_bench/hold_bench_20261108_183104.csv.gz` | H1 bare | same as above | completed | 71ee7ae clean |
