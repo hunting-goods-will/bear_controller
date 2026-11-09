@@ -1,0 +1,49 @@
+{
+ "script": "config_dump.py",
+ "time": "20261105_194107",
+ "id": 1,
+ "label": "sticky unit, bench",
+ "ping_word": 167969933,
+ "torque_enable": 3,
+ "error_byte": 144,
+ "present_position_rad": 3.4583301544189453,
+ "config": {
+  "id": 1,
+  "mode": 0,
+  "baudrate": 8000000,
+  "homing_offset": -12.801867485046387,
+  "p_gain_id": 0.019999999552965164,
+  "i_gain_id": 0.019999999552965164,
+  "d_gain_id": 0.0,
+  "p_gain_iq": 0.019999999552965164,
+  "i_gain_iq": 0.019999999552965164,
+  "d_gain_iq": 0.0,
+  "p_gain_velocity": 4.5,
+  "i_gain_velocity": 0.0010000000474974513,
+  "d_gain_velocity": 0.0,
+  "p_gain_position": 5.0,
+  "i_gain_position": 0.0,
+  "d_gain_position": 0.20000000298023224,
+  "p_gain_force": 0.0,
+  "i_gain_force": 0.0,
+  "d_gain_force": 0.0,
+  "limit_acc_max": 5.0,
+  "limit_i_max": 5.5,
+  "limit_velocity_max": 1.0,
+  "limit_position_min": -0.0872664600610733,
+  "limit_position_max": 2.181661605834961,
+  "min_voltage": 6.0,
+  "max_voltage": 60.0,
+  "watchdog_timeout": 0,
+  "temp_limit_low": 80.0,
+  "temp_limit_high": 100.0
+ },
+ "unreadable": [],
+ "vs_sticky_oct6": [
+  [
+   "homing_offset",
+   -12.801867485046387,
+   -20.3786
+  ]
+ ]
+}

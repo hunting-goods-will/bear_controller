@@ -69,11 +69,17 @@ def vest_deg(act_rad):
     return np.degrees(act_rad) + PHI_DEG
 
 
-def sweep_tables(path):
+def sweep_tables(path, bin_deg=BIN_DEG, allow_no_spring=False):
+    """allow_no_spring: a --no-spring sweep (friction map, Nov 5) has no spring in
+    y, so the hold scripts must never take it as a spring table. Only the friction
+    map analysis (the command line here) passes True."""
     comments, rows = read_csv(path)
     hdr = ' '.join(comments)
     if 'observer_excitation.py' not in hdr or 'mode=sweep' not in hdr:
         raise SystemExit(f"{path}: not an observer_excitation.py sweep log")
+    if 'no_spring=True' in hdr and not allow_no_spring:
+        raise SystemExit(f"{path}: a --no-spring sweep (friction map). Its y has no "
+                         f"spring in it; not usable as a spring table.")
     m = re.search(r'arm_mass_kg=([-\d.eE]+)', hdr)
     if not m or float(m.group(1)) != 0.0:
         raise SystemExit(f"{path}: not a bare sweep (arm_mass_kg must be 0)")
@@ -99,7 +105,7 @@ def sweep_tables(path):
         steady[idx] = np.abs(np.abs(gv) - nom) <= STEADY_TOL * nom
 
     vest = vest_deg(pos)
-    b = np.round(vest / BIN_DEG) * BIN_DEG
+    b = np.round(vest / bin_deg) * bin_deg
     table = []
     for bc in sorted(set(b[steady])):
         up = steady & (b == bc) & (direction > 0)
@@ -114,12 +120,12 @@ def sweep_tables(path):
     return np.array(table)          # cols: vest_mean, friction, y_sweep, n_up, n_dn
 
 
-def merge_sweeps(before, after):
+def merge_sweeps(before, after, bin_deg=BIN_DEG):
     """Average two sweep tables on their common 5-deg bins. Returns (table,
     stats) with table cols as sweep_tables() and stats = RMS/max of the
     after - before differences in y and f."""
     def keyed(t):
-        return {round(r[0] / BIN_DEG) * BIN_DEG: r for r in t}
+        return {round(r[0] / bin_deg) * bin_deg: r for r in t}
     kb, ka = keyed(before), keyed(after)
     common = sorted(set(kb) & set(ka))
     if len(common) < 2:
@@ -158,13 +164,18 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('sweep')
     ap.add_argument('--after', help='a second sweep from the same session')
+    ap.add_argument('--bin-deg', type=float, default=BIN_DEG,
+                    help=f'bin width, deg (default {BIN_DEG:g}; 1 for a friction map)')
     a = ap.parse_args(argv)
-    before = sweep_tables(a.sweep)
+    if not 0.5 <= a.bin_deg <= 10.0:
+        ap.error("--bin-deg must be 0.5-10")
+    # The command line only prints tables, so it may read a --no-spring friction map.
+    before = sweep_tables(a.sweep, a.bin_deg, allow_no_spring=True)
     print_table(before, f"Sweep: {a.sweep}")
     if a.after:
-        after = sweep_tables(a.after)
+        after = sweep_tables(a.after, a.bin_deg, allow_no_spring=True)
         print_table(after, f"Sweep: {a.after}")
-        merged, s = merge_sweeps(before, after)
+        merged, s = merge_sweeps(before, after, a.bin_deg)
         print_table(merged, "Average of the two (shared bins)")
         ok = s['rms_dy'] <= STABLE_DY and s['rms_df'] <= STABLE_DF
         print(f"\nDrift over {s['bins']} bins: y RMS {s['rms_dy']:.3f} (max {s['max_dy']:.3f}), "

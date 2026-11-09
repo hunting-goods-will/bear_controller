@@ -20,6 +20,18 @@ config.IQ_CEILING (10 A), for stronger spring settings. The aborts scale with it
 --bottom-deg D (Oct 28): lowest point of the sweep, 30 (default) to 60 deg. The
 down-leg current peaks near the bottom, so a stronger spring needs a higher one.
 
+--no-spring (Nov 5, STATE 8 #37): the friction map. Bare rig with NO spring
+installed, sweep only. Without a spring the released arm DROPS to the bottom
+bracket stop (~0 deg) instead of rising, so: the arm must start resting low
+(NO_SPRING_START_MIN_DEG..NO_SPRING_START_MAX_DEG; resting high means the spring
+is still in), the approach may start below MIN_ANGLE, the firmware
+limit_position_min is the flash value (-5 deg) instead of MIN_ANGLE so the arm
+resting on the stop doesn't latch Joint Limit, the park is LOW at
+NO_SPRING_PARK_DEG, and --bottom-deg may go down to 20. Goals after the
+approach are still clamped to MIN_ANGLE..MAX_ANGLE; aborts and --i-max
+unchanged (5.5 A). The CSV header says no_spring=True; sweep_tables() refuses
+it unless asked (allow_no_spring), so a hold script can't use it as a spring table.
+
 --j-sine (Oct 15): the J sine test (fit_j_sine.py). Bare rig, small fast sines;
 raises limit_velocity_max to 2 rad/s and limit_acc_max to 30 rad/s^2 for that
 run only (see the J_SINE_* constants). Aborts and current limits unchanged.
@@ -127,6 +139,13 @@ J_SINE_CENTER_MIN_DEG = 60.0      # deg (actuator); keeps the spring loading the
 J_SINE_CENTER_MAX_DEG = 90.0      #   gears one way and current under the aborts
 J_SINE_MAX_FREQ_HZ = 3.0
 
+# --- No-spring friction map (--no-spring; Nov 5) ----------------------------
+NO_SPRING_START_MIN_DEG = -3.0     # deg: the arm rests on the bottom bracket stop (~0)
+NO_SPRING_START_MAX_DEG = 30.0     # deg: resting higher means the spring is still in
+NO_SPRING_PARK_DEG = 10.0          # deg: park low; the release drops <= 10 deg onto the stop
+NO_SPRING_BOTTOM_MIN_DEG = 20.0    # deg: lowest --bottom-deg (the envelope minimum)
+FIRMWARE_POSITION_MIN_NO_SPRING = math.radians(-5.0)  # flash value (STATE 2.2)
+
 # --- Arguments: parsed and checked BEFORE BearInterface() opens the port ----
 _ap = argparse.ArgumentParser(
     description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -152,6 +171,9 @@ _ap.add_argument('--i-max', type=float, default=5.5,
                  help='per-run current limit, 5.5-10 A (aborts scale with it)')
 _ap.add_argument('--bottom-deg', type=float, default=30.0,
                  help='lowest point of the sweep, 30-60 deg (default 30)')
+_ap.add_argument('--no-spring', action='store_true',
+                 help='friction map: bare rig, NO spring installed, sweep only '
+                      '(arm starts low, parks low, --bottom-deg down to 20)')
 _ap.add_argument('--j-sine', action='store_true',
                  help='J sine test: bare rig, sine only, amp <= '
                       f'{J_SINE_MAX_AMP_DEG:g} deg, centre {J_SINE_CENTER_MIN_DEG:g}-'
@@ -175,8 +197,17 @@ if _args.arm_mass_kg < 0 or _args.arm_com_m < 0:
 I_MAX_DEFAULT = 5.5
 if not I_MAX_DEFAULT <= _args.i_max <= IQ_CEILING:
     _ap.error(f"--i-max must be {I_MAX_DEFAULT}-{IQ_CEILING} A (config.IQ_CEILING)")
-if not 30.0 <= _args.bottom_deg <= 60.0:
-    _ap.error("--bottom-deg must be 30-60 deg")
+NO_SPRING = _args.no_spring
+if NO_SPRING:
+    if _args.mode != 'sweep':
+        _ap.error("--no-spring needs --mode sweep")
+    if _args.arm_mass_kg != 0.0:
+        _ap.error("--no-spring is for the bare rig only (--arm-mass-kg 0)")
+    if _args.i_max != I_MAX_DEFAULT:
+        _ap.error("--no-spring keeps --i-max at its default (5.5 A)")
+_BOTTOM_MIN = NO_SPRING_BOTTOM_MIN_DEG if NO_SPRING else 30.0
+if not _BOTTOM_MIN <= _args.bottom_deg <= 60.0:
+    _ap.error(f"--bottom-deg must be {_BOTTOM_MIN:g}-60 deg")
 if _args.mode != 'sweep' and _args.bottom_deg != 30.0:
     _ap.error("--bottom-deg only applies to --mode sweep")
 # Current aborts scale with the per-run limit (defaults: 5.0 / 5.3 / 5.0 A).
@@ -249,7 +280,9 @@ SETTINGS = [
     ('limit_i_max', LIMIT_I_MAX),
     ('limit_velocity_max', LIMIT_VELOCITY_MAX),
     ('limit_acc_max', LIMIT_ACC_MAX),
-    ('limit_position_min', MIN_ANGLE),
+    # --no-spring: the arm starts on the bottom stop (~0 deg), below MIN_ANGLE, and the
+    # firmware latches Joint Limit whenever the arm is past this limit, even disabled.
+    ('limit_position_min', FIRMWARE_POSITION_MIN_NO_SPRING if NO_SPRING else MIN_ANGLE),
     ('limit_position_max', FIRMWARE_POSITION_MAX),
 ]
 
@@ -273,9 +306,9 @@ HARD_STOP_DEG = 119.5
 # stop -- as the bare arm did on the first run (observer_sweep_bare_
 # 20260930_144400: parked at 24 deg, drawing up to -4.8 A against the spring).
 PARK_HIGH_DEG = 110.0        # below MAX_ANGLE (118)
-PARK_LOW_DEG = 24.0
-PARK_LOW_VEST_DEG = actuator_to_vest_deg(math.radians(PARK_LOW_DEG))  # 96
-PARK_SPRING_NM = tau_spring(PARK_LOW_VEST_DEG)
+PARK_LOW_DEG = NO_SPRING_PARK_DEG if NO_SPRING else 24.0
+PARK_LOW_VEST_DEG = actuator_to_vest_deg(math.radians(PARK_LOW_DEG))  # 96 (82 no spring)
+PARK_SPRING_NM = 0.0 if NO_SPRING else tau_spring(PARK_LOW_VEST_DEG)
 if PARK_SPRING_NM is None:
     # Outside the characterized table: no model answer, so no park direction.
     raise SystemExit(f"REFUSED: vest {PARK_LOW_VEST_DEG:.1f} deg (low park) is "
@@ -287,7 +320,8 @@ if PARK_NET_NM > 0:
     PARK_WHY = "spring wins at the low park, a released arm RISES into the top stop"
 else:
     PARK_DEG, PARK_DIR = PARK_LOW_DEG, -1.0
-    PARK_WHY = "load wins at the low park, a released arm DROPS into the bottom stop"
+    PARK_WHY = ("no spring installed" if NO_SPRING else "load wins at the low park") + \
+        ", a released arm DROPS into the bottom stop"
 PARK_SUMMARY = (
     f"{'HIGH' if PARK_DIR > 0 else 'LOW'} at {PARK_DEG:.0f} deg -- net = "
     f"tau_spring {PARK_SPRING_NM:.3f} - tau_gravity {PARK_GRAVITY_NM:.3f} = "
@@ -411,7 +445,7 @@ if EXCITE_S > RUN_CAP_S:
     _ap.error(f"planned excitation {EXCITE_S:.1f}s exceeds the {RUN_CAP_S:.0f}s "
               f"run cap")
 
-LOAD_LABEL = 'bare' if ARM_MASS_KG == 0 else 'wrench'
+LOAD_LABEL = ('bare_nospring' if NO_SPRING else 'bare') if ARM_MASS_KG == 0 else 'wrench'
 log_path = os.path.join(
     LOG_DIR, 'phase2', 'observer_csvs',
     f"observer_{'jsine' if J_SINE else MODE}_{LOAD_LABEL}"
@@ -536,7 +570,10 @@ def run_leg(writer, phase, start, target):
         ramp = min(1.0, elapsed / SOFT_START, remaining / DECEL_RAD)
         ramp = max(ramp, RAMP_FLOOR)
         goal += direction * VELOCITY * ramp * dt
-        goal = max(MIN_ANGLE, min(goal, MAX_ANGLE))
+        # Lower clamp MIN_ANGLE, or the start if lower: --no-spring approaches from the
+        # bottom stop (~0 deg) and must not jump to MIN_ANGLE. Every other leg starts
+        # above MIN_ANGLE (start checks), so for them this is MIN_ANGLE as before.
+        goal = max(min(MIN_ANGLE, start), min(goal, MAX_ANGLE))
         arrived = (goal - target) * direction >= 0 or remaining < ARRIVE_EPS
         if arrived:
             goal = target
@@ -669,6 +706,8 @@ try:
     print("=" * 74)
     print(f"  OBSERVER EXCITATION -- mode {MODE}, Position Mode drives")
     print(f"  load {ARM_MASS_KG:.4f} kg at {ARM_COM_M * 1000:.1f} mm ({LOAD_LABEL})")
+    if NO_SPRING:
+        print("  NO SPRING (friction map): starts low, parks LOW, released arm drops to the stop")
     print("=" * 74)
     print(f"pos {math.degrees(pos):.2f} deg  err {err}  "
           f"w {S['temps']['w']:.1f}C  p {S['temps']['p']:.1f}C")
@@ -678,7 +717,14 @@ try:
     if max(S['temps']['w'], S['temps']['p']) >= TEMP_WARN:
         raise Abort(f"Already at/above TEMP_WARN ({TEMP_WARN}C) before "
                     f"enabling. Let it cool.")
-    if pos <= MIN_ANGLE:
+    if NO_SPRING:
+        if not NO_SPRING_START_MIN_DEG <= math.degrees(pos) <= NO_SPRING_START_MAX_DEG:
+            raise SystemExit(
+                f"--no-spring: the arm rests at {math.degrees(pos):.2f} deg. With no spring "
+                f"it should rest low ({NO_SPRING_START_MIN_DEG:g} to "
+                f"{NO_SPRING_START_MAX_DEG:g} deg). Is the spring still installed? If not, "
+                f"lower the arm onto the bottom stop by hand (motor is off) and run again.")
+    elif pos <= MIN_ANGLE:
         raise SystemExit("Start position below MIN_ANGLE.")
     if pos >= math.radians(HARD_STOP_DEG):
         raise SystemExit(
@@ -728,7 +774,11 @@ try:
     pos, _, _, err = read()
     if err != 128:
         raise Abort(f"Error byte {err} before enabling")
-    if pos <= MIN_ANGLE or pos >= math.radians(HARD_STOP_DEG):
+    if NO_SPRING:
+        _start_ok = NO_SPRING_START_MIN_DEG <= math.degrees(pos) <= NO_SPRING_START_MAX_DEG
+    else:
+        _start_ok = MIN_ANGLE < pos < math.radians(HARD_STOP_DEG)
+    if not _start_ok:
         raise SystemExit(f"Position {math.degrees(pos):.2f} deg out of range "
                          f"at enable.")
 
@@ -741,7 +791,8 @@ try:
     f.write(f"# mode={MODE} arm_mass_kg={ARM_MASS_KG} arm_com_m={ARM_COM_M} "
             f"velocity={VELOCITY} soft_start_s={SOFT_START} freq_hz={FREQ_HZ} "
             f"amp_deg={AMP_DEG} center_deg={CENTER_DEG} cycles={CYCLES} "
-            f"j_sine={J_SINE} i_max={LIMIT_I_MAX:g} bottom_deg={SWEEP_BOTTOM_DEG:g}\n")
+            f"j_sine={J_SINE} i_max={LIMIT_I_MAX:g} bottom_deg={SWEEP_BOTTOM_DEG:g} "
+            f"no_spring={NO_SPRING}\n")
     f.write(f"# units: t s since the enable command (time.monotonic), taken at "
             f"the start of the cycle (before the goal write); loop_dt s; "
             f"goal_pos, pos rad; vel rad/s (present_velocity register); "

@@ -41,6 +41,11 @@ Checks:
      disable last (confirmed on its first torque_enable = 0), fake current
      matches the measured run, CSV parses with sweep_tables and recovers the
      fake's y / f, t < t_pos < t_vel < t_iq on every row;
+  4c. --no-spring (friction map, Nov 5): argument guards; refuses if the arm rests
+     high (spring still in); from the bottom stop: limit_position_min -5 deg, no
+     goal jump, parks LOW at 10 deg, released arm drops to the stop without a Joint
+     Limit latch; sweep_tables refuses the CSV by default and, when allowed, recovers
+     a 1-deg friction bump and y = -rig gravity; an abort still ends disabled;
   5. runtime aborts (current, trip, jam, error byte, temperature, run cap,
      Ctrl-C) and every park release branch (park current, park stall, park
      deadline, Ctrl-C in the park): each ends with a confirmed disable and
@@ -170,8 +175,16 @@ class Clock:
 
 class PosFake:
     def __init__(self, clock, start_deg=116.5, top_stop_deg=116.5, seed=27,
-                 drop=(), err=0x80, temp=30.0, bounce_deg=3.0):
+                 drop=(), err=0x80, temp=30.0, bounce_deg=3.0,
+                 y_fn=None, f_fn=None, bottom_stop_deg=None, min_latch=False):
         self.clock = clock
+        # --no-spring fakes (section 4c) swap in their own y / friction, add the
+        # bottom bracket stop, and latch Joint Limit below the written
+        # limit_position_min. Defaults leave every older section unchanged.
+        self.y_fn = y_fn or y_nm
+        self.f_fn = f_fn or fric_nm
+        self.bottom = None if bottom_stop_deg is None else math.radians(bottom_stop_deg)
+        self.min_latch = min_latch
         clock.sim = self
         self.top = math.radians(top_stop_deg)
         # A free arm hitting the top stop bounces past it (Oct 15: 120.18 deg from a
@@ -236,13 +249,13 @@ class PosFake:
             self.pos += self.vel * h
             if abs(self.vel) > 0.002:
                 self.fric_dir = math.copysign(1.0, self.vel)
-            fr = fric_nm(self.pos) * self.fric_dir
-            tau = J * acc - y_nm(self.pos) + fr
+            fr = self.f_fn(self.pos) * self.fric_dir
+            tau = J * acc - self.y_fn(self.pos) + fr
             self.iq = tau / KT
         else:
             self.iq = 0.0
             self.fric_dir = 0.0
-            tau = y_nm(self.pos)
+            tau = self.y_fn(self.pos)
             if self.vel == 0.0:
                 if abs(tau) > F_STATIC:
                     self.vel = (tau - math.copysign(F_STATIC, tau)) / J * h
@@ -257,6 +270,12 @@ class PosFake:
                 self.te = self.te_visible = 3
                 self.te_change_at = None
             self.pos, self.vel = self.top, min(self.vel, 0.0)
+        if self.bottom is not None and self.pos <= self.bottom:
+            self.pos, self.vel = self.bottom, max(self.vel, 0.0)
+        if self.min_latch and self.pos < self.regs['limit_position_min'] - 1e-9 and self.err == 0x80:
+            self.err = 0x90                       # Joint Limit, even when disabled
+            self.te = self.te_visible = 3
+            self.te_change_at = None
 
     def _read(self, name):
         if name == 'torque_enable':
@@ -968,9 +987,166 @@ def section5():
         os.remove(r['csv'])
 
 
+# --- 4c. --no-spring friction map ------------------------------------------------
+NS_ARGS = ['--mode', 'sweep', '--no-spring', '--arm-mass-kg', '0', '--arm-com-m', '0',
+           '--velocity', '0.05', '--soft-start-s', '0.3', '--bottom-deg', '20']
+NS_F_BASE = 0.55                      # N m, friction away from the band (a guess: no data yet)
+NS_BAND = (66.0, 72.0, 0.45)          # act deg from, to, extra N m (the stiff band)
+
+
+def ns_y(act):
+    """No spring: y = spring - rig gravity = -RIG_MGL sin(vest)."""
+    from main_controller.controller import RIG_MGL
+    return -RIG_MGL * math.sin(math.radians(math.degrees(act) + PHI_DEG))
+
+
+def ns_f(act):
+    d = math.degrees(act)
+    lo, hi, extra = NS_BAND
+    return NS_F_BASE + (extra if lo <= d <= hi else 0.0)
+
+
+def ns_fake(clock, start_deg=0.0):
+    return PosFake(clock, start_deg=start_deg, y_fn=ns_y, f_fn=ns_f,
+                   bottom_stop_deg=0.0, min_latch=True)
+
+
+def run_ns(label, args=None, start_deg=0.0, setup=None, on_input=None):
+    clock = Clock()
+    fake = ns_fake(clock, start_deg)
+    if setup:
+        setup(fake)
+    r = invoke(args or NS_ARGS, fake, clock, on_input=(lambda: on_input(fake)) if on_input else None)
+    WRITE_LOG[label] = compress(fake.writes, fake.calls)
+    return r
+
+
+def section4c():
+    print("4c. --no-spring friction map: " + ' '.join(NS_ARGS))
+    # argument guards: refused before the port opens
+    for extra, why in ((['--mode', 'sine', '--freq-hz', '0.3'], 'sine'),
+                       (['--arm-mass-kg', '1.5', '--arm-com-m', '0.27'], 'a load'),
+                       (['--i-max', '7'], '--i-max 7'),
+                       (['--bottom-deg', '19'], '--bottom-deg 19')):
+        a = list(NS_ARGS)
+        for i in range(0, len(extra), 2):
+            if extra[i] in a:
+                a[a.index(extra[i]) + 1] = extra[i + 1]
+            else:
+                a += extra[i:i + 2]
+        r = invoke(a, None)
+        check(f"--no-spring with {why}: refused before the port opens",
+              r['rc'] not in (0, None) and r['ports'] == 0, str(r['rc'])[:80])
+    a = [x for x in NS_ARGS if x != '--no-spring']
+    r = invoke(a, None)
+    check("--bottom-deg 20 without --no-spring: still refused (30-60)",
+          r['rc'] not in (0, None) and r['ports'] == 0, str(r['rc'])[:80])
+    # without --no-spring, an arm resting on the bottom stop is refused as before
+    clock = Clock()
+    fake = ns_fake(clock)
+    r = invoke(a[:-2], fake, clock)
+    check("no flag, arm at 0 deg: refused 'below MIN_ANGLE', only the never-enabled "
+          "disable written (goal_iq 0, torque_enable 0)",
+          'below MIN_ANGLE' in str(r['rc']) and names(fake) == ['goal_iq', 'torque_enable']
+          and not enable1_written(fake), str(r['rc'])[:60] + ' ' + compress(fake.writes))
+    # spring still installed: the bare arm rests high
+    r = run_ns("4c. --no-spring, arm resting at 116.5 (spring still in)", start_deg=116.5)
+    check("--no-spring, arm resting at 116.5 deg: refused (spring still in?), only the "
+          "never-enabled disable written",
+          'spring still installed' in str(r['rc'])
+          and names(r['fake']) == ['goal_iq', 'torque_enable'] and not enable1_written(r['fake']),
+          str(r['rc'])[:60] + ' ' + compress(r['fake'].writes))
+
+    # the arm is lifted while the script waits at the Enter prompt: re-checked at enable
+    r = run_ns("4c. --no-spring, arm lifted to 45 deg at the prompt",
+               on_input=lambda f: setattr(f, 'pos', math.radians(45.0)))
+    check("--no-spring, arm lifted to 45 deg at the prompt: refused at enable, never enabled",
+          'out of range at enable' in str(r['rc']) and not enable1_written(r['fake']),
+          str(r['rc'])[:80])
+
+    r = run_ns("4c. --no-spring friction map, normal")
+    fake = r['fake']
+    check("normal: completes, exit 0, CSV written", r['rc'] == 0 and r['csv'] is not None,
+          f"rc {str(r['rc'])[:200]}")
+    if not r['csv']:
+        print(r['out'][-3000:])
+        return
+    w = fake.writes
+    vals = {n: v for _, n, v in w[:17]}
+    check("settings: limit_position_min = -5 deg (flash value), max 125, i_max 5.5",
+          abs(vals['limit_position_min'] - math.radians(-5.0)) < 1e-9
+          and abs(vals['limit_position_max'] - math.radians(125.0)) < 1e-9
+          and vals['limit_i_max'] == 5.5)
+    check("no Joint Limit latch at enable (error 0x80 through the run)",
+          '# END: complete' in csv_end(r['csv']), csv_end(r['csv'])[:80])
+    gl = [v for _, n, v in w if n == 'goal_position']
+    check("first goal = start position on the stop (no lurch)", abs(math.degrees(gl[0])) < 0.2,
+          f"{math.degrees(gl[0]):.2f} deg")
+    seen, rows = phases(r['csv'])
+    ap = [gl[0]] + [float(x['goal_pos']) for x in rows if x['phase'] == 'approach']
+    steps = [abs(b - a) for a, b in zip(ap, ap[1:])]
+    # (the 0.5 deg arrival snap at the END of a leg is old behaviour, so stop before it)
+    check("approach from the stop: no goal jump before 99 deg (max step < 0.1 deg), "
+          "never below the start",
+          math.degrees(max(st for st, g in zip(steps, ap[1:]) if math.degrees(g) < 99.0)) < 0.1
+          and min(ap) >= gl[0] - 1e-9,
+          f"max step {math.degrees(max(steps[:-5])):.3f} deg, min goal {math.degrees(min(ap)):.2f}")
+    check("phases approach -> down -> dwell -> up -> park",
+          seen == ['approach', 'down', 'dwell', 'up', 'park'], ' -> '.join(seen))
+    after = [x for x in rows if x['phase'] in ('down', 'dwell', 'up')]
+    lo = min(math.degrees(float(x['goal_pos'])) for x in after)
+    check("after the approach every goal stays >= MIN_ANGLE; sweep bottom 20 deg",
+          abs(lo - 20.0) < 0.01, f"min goal {lo:.2f} deg")
+    park = [x for x in rows if x['phase'] == 'park']
+    check("parks LOW: last park goal 10 deg, says 'no spring installed'",
+          park and abs(math.degrees(float(park[-1]['goal_pos'])) - 10.0) < 0.01
+          and 'Park: LOW' in r['out'] and 'no spring installed' in r['out'])
+    at_release = math.degrees(fake.pos)
+    fake.clock.advance(3.0)
+    check("released near 10 deg, arm drops onto the bottom stop, no Joint Limit latch",
+          8.5 < at_release < 12.5 and abs(math.degrees(fake.pos)) < 0.05
+          and fake.err == 0x80 and fake.te_visible == 0,
+          f"{at_release:.1f} -> {math.degrees(fake.pos):.2f} deg, error {hex(fake.err)}")
+    ends_disabled(fake, "no-spring")
+    hdr = ' '.join(read_csv(r['csv'])[0])
+    check("CSV header no_spring=True, file named *_bare_nospring_*",
+          'no_spring=True' in hdr and '_bare_nospring_' in os.path.basename(r['csv']))
+    a_max = max(abs(float(x['present_iq'])) for x in rows)
+    check("current stays far under the 5.0 A abort (fake)", a_max < 4.0, f"max {a_max:.2f} A")
+    try:
+        sweep_tables(r['csv'])
+        refused = False
+    except SystemExit:
+        refused = True
+    check("sweep_tables() refuses it by default (a hold script can't use it)", refused)
+    tab = sweep_tables(r['csv'], bin_deg=1.0, allow_no_spring=True)
+    acts = tab[:, 0] - PHI_DEG
+    band = tab[(acts > NS_BAND[0] + 1) & (acts < NS_BAND[1] - 1)]
+    away = tab[(acts < NS_BAND[0] - 3) | (acts > NS_BAND[1] + 3)]
+    check("1-deg bins: >= 60 bins over act 20-100", len(tab) >= 60, f"{len(tab)} bins")
+    fb = float(band[:, 1].mean()) if len(band) else float('nan')
+    fa = float(away[:, 1].mean()) if len(away) else float('nan')
+    check("recovers the stiff band: f inside the band ~ base + 0.45 N m, outside ~ base",
+          abs(fb - (NS_F_BASE + NS_BAND[2])) < 0.08 and abs(fa - NS_F_BASE) < 0.05,
+          f"band {fb:.3f}, away {fa:.3f} N m")
+    yerr = max(abs(row[2] - ns_y(math.radians(row[0] - PHI_DEG))) for row in tab)
+    check("recovers y = -rig gravity within 0.05 N m (a check of RIG_MGL on hardware)",
+          yerr < 0.05, f"max error {yerr:.3f}")
+    os.remove(r['csv'])
+
+    # an abort mid-run (jam) still parks low / releases and ends disabled
+    r = run_ns("4c. --no-spring, jam at 20 s", setup=lambda f: setattr(f, 'jam_after', 20.0))
+    end = csv_end(r['csv']) if r['csv'] else ''
+    check("jam: aborts, ends disabled, CSV names the abort", r['rc'] != 0 and 'abort' in end,
+          f"rc {str(r['rc'])[:40]}; {end[:100]}")
+    ends_disabled(r['fake'], "no-spring jam")
+    if r['csv']:
+        os.remove(r['csv'])
+
+
 def main():
     import traceback
-    for sec in (section1, section2, section3, section4, section4b, section5):
+    for sec in (section1, section2, section3, section4, section4b, section4c, section5):
         try:
             sec()
         except Exception:

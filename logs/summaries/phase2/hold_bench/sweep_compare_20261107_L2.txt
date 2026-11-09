@@ -1,0 +1,46 @@
+# compare_sweeps.py logs/phase2/observer_csvs/observer_sweep_bare_20261029_142652.csv logs/phase2/observer_csvs/observer_sweep_bare_20261029_145313.csv logs/phase2/observer_csvs/observer_sweep_bare_20261107_232707.csv logs/phase2/observer_csvs/observer_sweep_bare_20261107_234129.csv
+
+y = spring - rig gravity (N m)
+  vest   act 10-29 14:26 10-29 14:53 11-07 23:27 11-07 23:41      spread
+   135    63       3.568       3.583           -           -       0.016
+   140    68       3.296       3.290       2.805       2.799       0.496
+   145    73       3.070       3.106       2.749       2.727       0.379
+   150    78       2.870       2.914       2.684       2.664       0.250
+   155    83       2.801       2.833       2.668       2.635       0.199
+   160    88       2.773       2.797       2.310       2.302       0.495
+   165    93       2.732       2.752           -           -       0.020
+   170    98       2.733       2.755           -           -       0.022
+
+f = friction (N m)
+  vest   act 10-29 14:26 10-29 14:53 11-07 23:27 11-07 23:41      spread
+   135    63       1.032       1.040           -           -       0.008
+   140    68       1.392       1.353       1.158       1.068       0.324
+   145    73       1.319       1.303       1.173       1.084       0.235
+   150    78       1.151       1.145       1.135       1.058       0.092
+   155    83       1.178       1.158       1.158       1.068       0.110
+   160    88       1.167       1.136       0.955       0.894       0.273
+   165    93       1.189       1.155           -           -       0.034
+   170    98       1.126       1.098           -           -       0.028
+
+Every pair (shared bins; gate y <= 0.06, f <= 0.1 N m)
+pair                             apart  bins   RMS dy   max dy   RMS df   max df  verdict
+10-29 14:26 -> 10-29 14:53      26 min     8    0.028    0.044    0.025    0.039  STABLE
+10-29 14:26 -> 11-07 23:27   13560 min     5    0.349    0.491    0.156    0.235  MOVED
+10-29 14:26 -> 11-07 23:41   13575 min     5    0.362    0.496    0.226    0.324  MOVED
+10-29 14:53 -> 11-07 23:27   13534 min     5    0.369    0.487    0.132    0.195  MOVED
+10-29 14:53 -> 11-07 23:41   13548 min     5    0.383    0.495    0.202    0.285  MOVED
+11-07 23:27 -> 11-07 23:41      14 min     5    0.020    0.033    0.082    0.091  STABLE
+
+Each sweep vs the first (10-29 14:26): offset = mean change, shape = RMS after removing it
+sweep           y offset   y shape  f offset   f shape
+10-29 14:53       +0.024     0.014    -0.021     0.015
+11-07 23:27       -0.319     0.143    -0.125     0.093
+11-07 23:41       -0.336     0.134    -0.207     0.091
+
+Current peaks against each sweep's own limits (abort = i_max - 0.5 A x3, trip = i_max - 0.2 A)
+sweep           i_max      from  max |iq|  lowest-of-3  abort x3  margin x3   trip  margin trip
+10-29 14:26      8.50    header      8.12         7.86      8.00       0.14   8.30         0.18
+10-29 14:53      8.50    header      7.79         7.65      8.00       0.35   8.30         0.51
+11-07 23:27      8.50    header      6.56         6.26      8.00       1.74   8.30         1.74
+11-07 23:41      8.50    header      6.40         6.12      8.00       1.88   8.30         1.90
+(a negative margin means that limit was reached: the sweep aborted there)
