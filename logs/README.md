@@ -37,6 +37,13 @@ All hold-bench runs: git 9be7286 clean, bare (no payload), single angle each, cr
 | `phase2/hold_bench/hold_bench_20261110_194748.csv.gz` | H1 bare | angles [80] | completed | 9be7286 clean |
 | `phase2/observer_csvs/observer_sweep_wrench_20261110_201024.csv.gz` | H0 sweep, 1.137 kg plate | i_max 10, bottom_deg 45, soft_start 0.3 s, --park high (model said LOW) | complete; parked | not recorded |
 
+### 2026-11-10 (worn, motor off; spring Level 2 per run notes)
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/worn/worn_20261110_205000.csv.gz` | worn logger (H4 run 1) | blocks rest:10, mock_work:180; tasks: screws, level, sanding, place part | completed (94965 rows) | 9be7286 |
+| `phase2/worn/worn_20261110_205706.csv.gz` | worn logger (H4 run 2) | blocks mock_work:180, lower_controlled:8x3 | completed (101967 rows) | 9be7286 |
+
 ### 2026-11-08 (spring not recorded in the files)
 
 Aborted, interrupted and refused hold-bench runs from this day were deleted (Sam, Nov 8).
