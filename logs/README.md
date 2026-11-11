@@ -35,6 +35,7 @@ All hold-bench runs: git 9be7286 clean, bare (no payload), single angle each, cr
 | `phase2/hold_bench/hold_bench_20261110_194408.csv.gz` | H1 bare | angles [95] | completed | 9be7286 clean |
 | `phase2/hold_bench/hold_bench_20261110_194605.csv.gz` | H1 bare | angles [88] | completed; limit_i_max NOT restored | 9be7286 clean |
 | `phase2/hold_bench/hold_bench_20261110_194748.csv.gz` | H1 bare | angles [80] | completed | 9be7286 clean |
+| `phase2/observer_csvs/observer_sweep_wrench_20261110_201024.csv.gz` | H0 sweep, 1.137 kg plate | i_max 10, bottom_deg 45, soft_start 0.3 s, --park high (model said LOW) | complete; parked | not recorded |
 
 ### 2026-11-08 (spring not recorded in the files)
 
