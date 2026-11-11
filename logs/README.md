@@ -22,6 +22,20 @@ Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, n
 folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
 Paths are under `logs/`.
 
+### 2026-11-10 (spring not recorded in the files)
+
+All hold-bench runs: git 9be7286 clean, bare (no payload), single angle each, creep_cycles 10, i_max 8.5, driven from the one sweep below. Run 194605 ended with `limit_i_max` NOT restored (read back 8.5, wrote 5.5): power-cycle needed before the next script.
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_bare_20261110_191001.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60, soft_start 0.3 s, velocity 0.10 | complete; parked | not recorded |
+| `phase2/hold_bench/hold_bench_20261110_193408.csv.gz` | H1 bare | angles [95] | completed | 9be7286 clean |
+| `phase2/hold_bench/hold_bench_20261110_193619.csv.gz` | H1 bare | angles [88] | completed | 9be7286 clean |
+| `phase2/hold_bench/hold_bench_20261110_194004.csv.gz` | H1 bare | angles [80] | completed | 9be7286 clean |
+| `phase2/hold_bench/hold_bench_20261110_194408.csv.gz` | H1 bare | angles [95] | completed | 9be7286 clean |
+| `phase2/hold_bench/hold_bench_20261110_194605.csv.gz` | H1 bare | angles [88] | completed; limit_i_max NOT restored | 9be7286 clean |
+| `phase2/hold_bench/hold_bench_20261110_194748.csv.gz` | H1 bare | angles [80] | completed | 9be7286 clean |
+
 ### 2026-11-08 (spring not recorded in the files)
 
 Aborted, interrupted and refused hold-bench runs from this day were deleted (Sam, Nov 8).
