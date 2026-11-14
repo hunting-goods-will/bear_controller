@@ -33,6 +33,8 @@ Paths are under `logs/`.
 
 | File | Run type | Key arguments | Outcome | git |
 |---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_bare_20261114_132601.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_wrench_20261114_133005.csv.gz` | H0 sweep, 1.137 kg plate | i_max 10, bottom_deg 45, --park high | complete; parked | not recorded |
 | `phase2/observer_csvs/observer_sweep_wrench_20261114_125437.csv.gz` | H0 sweep, 1.593 kg load r 0.213 m | i_max 8.5, bottom_deg 45, --park low | complete; parked | not recorded |
 
 ### 2026-11-13
