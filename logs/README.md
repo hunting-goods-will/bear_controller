@@ -22,12 +22,21 @@ Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, n
 folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
 Paths are under `logs/`.
 
-### 2026-11-14 (v2 bench, spring Level 1 per filename)
+### 2026-11-14 (v2 bench L1 and v2 worn L3 runs)
+
+A refused v2 worn run (140937, "watchdog read back 0 us, wrote 10000 us", no data) was deleted.
 
 | File | Run type | Key arguments | Outcome | git |
 |---|---|---|---|---|
 | `phase2/v2/v2_bench_L1_20261114_130213.csv.gz` | v2 bench | --level L1 --cap-a 8.0 --bench-angles 78,82,85,88 --bench-hold-s 32, payload 1.593 kg r 0.213 m | completed (bench plan done) | not recorded |
 | `phase2/v2/v2_bench_L1_20261114_130545.csv.gz` | v2 bench | same as above | plan completed, but END EXIT NOT CLEAN (watchdog reads 10000) | not recorded |
+| `phase2/v2/v2_worn_L3_20261114_140047.csv.gz` | v2 worn | --level L3 --cap-a 5.5 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
+| `phase2/v2/v2_worn_L3_20261114_140310.csv.gz` | v2 worn | --level L3 --cap-a 5.5 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
+| `phase2/v2/v2_worn_L3_20261114_140442.csv.gz` | v2 worn | --level L3 --cap-a 5.5 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
+| `phase2/v2/v2_worn_L3_20261114_140643.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 | run completed, but END EXIT NOT CLEAN (watchdog reads 10000) | 85e265f clean |
+| `phase2/v2/v2_worn_L3_20261114_140759.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
+| `phase2/v2/v2_worn_L3_20261114_140912.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
+| `phase2/v2/learner_sam_20261114.json.gz` | learner state file (sam), saved after the last run | - | empty state (window [], level 0, A_id null, last null) | - |
 
 ### 2026-11-14
 
