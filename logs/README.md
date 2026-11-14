@@ -22,6 +22,13 @@ Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, n
 folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
 Paths are under `logs/`.
 
+### 2026-11-14 (v2 bench, spring Level 1 per filename)
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/v2/v2_bench_L1_20261114_130213.csv.gz` | v2 bench | --level L1 --cap-a 8.0 --bench-angles 78,82,85,88 --bench-hold-s 32, payload 1.593 kg r 0.213 m | completed (bench plan done) | not recorded |
+| `phase2/v2/v2_bench_L1_20261114_130545.csv.gz` | v2 bench | same as above | plan completed, but END EXIT NOT CLEAN (watchdog reads 10000) | not recorded |
+
 ### 2026-11-14
 
 | File | Run type | Key arguments | Outcome | git |
