@@ -36,7 +36,11 @@ A refused v2 worn run (140937, "watchdog read back 0 us, wrote 10000 us", no dat
 | `phase2/v2/v2_worn_L3_20261114_140643.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 | run completed, but END EXIT NOT CLEAN (watchdog reads 10000) | 85e265f clean |
 | `phase2/v2/v2_worn_L3_20261114_140759.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
 | `phase2/v2/v2_worn_L3_20261114_140912.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 | completed (60 s cap) | 85e265f clean |
-| `phase2/v2/learner_sam_20261114.json.gz` | learner state file (sam), saved after the last run | - | empty state (window [], level 0, A_id null, last null) | - |
+| `phase2/v2/v2_worn_L3_20261114_161212.csv.gz` | v2 worn | --level L3 --cap-a 5.5 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
+| `phase2/v2/v2_worn_L3_20261114_161327.csv.gz` | v2 worn | --level L3 --cap-a 5.5 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
+| `phase2/v2/v2_worn_L3_20261114_161451.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
+| `phase2/v2/v2_worn_L3_20261114_161601.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
+| `phase2/v2/learner_sam_20261114.json.gz` | learner state file (sam), saved after the last run | - | state after the last run of the day (2-point window, level 0, A_id null); overwritten Nov 14 evening, the earlier empty snapshot is in git history | - |
 
 ### 2026-11-14
 
