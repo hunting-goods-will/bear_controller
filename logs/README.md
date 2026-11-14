@@ -22,6 +22,12 @@ Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, n
 folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
 Paths are under `logs/`.
 
+### 2026-11-14
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_wrench_20261114_125437.csv.gz` | H0 sweep, 1.593 kg load r 0.213 m | i_max 8.5, bottom_deg 45, --park low | complete; parked | not recorded |
+
 ### 2026-11-13
 
 | File | Run type | Key arguments | Outcome | git |
