@@ -22,6 +22,13 @@ Oct 28); L2 = Level 2, Low zone (from Oct 29). "no data" = header/footer only, n
 folder notes below discuss this file (reviews and corrections live there, e.g. watchdog T4).
 Paths are under `logs/`.
 
+### 2026-11-13
+
+| File | Run type | Key arguments | Outcome | git |
+|---|---|---|---|---|
+| `phase2/observer_csvs/observer_sweep_bare_20261113_195031.csv.gz` | H0 sweep | i_max 8.5, bottom_deg 60 | complete; parked | not recorded |
+| `phase2/observer_csvs/observer_sweep_wrench_20261113_195436.csv.gz` | H0 sweep, 1.137 kg plate | i_max 10, bottom_deg 45, --park high | complete; parked | not recorded |
+
 ### 2026-11-10 (spring not recorded in the files)
 
 All hold-bench runs: git 9be7286 clean, bare (no payload), single angle each, creep_cycles 10, i_max 8.5, driven from the one sweep below. Run 194605 ended with `limit_i_max` NOT restored (read back 8.5, wrote 5.5): power-cycle needed before the next script.
