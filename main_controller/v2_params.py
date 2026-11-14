@@ -1,4 +1,4 @@
-"""Controller v2 parameters: V2_ARCHITECTURE v1.4 in code (Nov 12, 2026).
+"""Controller v2 parameters: V2_ARCHITECTURE v1.5 in code (Nov 14, 2026).
 
 One place for every number the v2 run loop (run_v2.py) and the v2 controller
 (v2_control.py) use. Pure data and small pure functions: no bus, no I/O.
@@ -141,7 +141,8 @@ SEP_DEG = 10.0
 TOL_NM = 1.5
 DROP_NM = 2.0
 OFFSET_NM = 0.4                    # arm units, envelope term
-FAST_MARGIN_READING_NM = 0.25      # reading units, single-reading term (C1)
+FAST_MARGIN_READING_NM = 0.40      # reading units, single-reading term (C1: 0.25; 0.40 since
+                                   # Nov 14: upward bench bias +0.16, Project doc BENCH_D)
 A_CAP_NM = 28.0
 A_LOW_NM = 6.0                     # unidentified: A_low on the L3 table
 

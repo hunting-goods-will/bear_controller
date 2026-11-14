@@ -1,5 +1,5 @@
 """
-Controller v2 run script (V2_ARCHITECTURE v1.4). THIS SCRIPT ENABLES TORQUE (Mode 0).
+Controller v2 run script (V2_ARCHITECTURE v1.5). THIS SCRIPT ENABLES TORQUE (Mode 0).
 
 The plumbing around the v2 controller: bus, sensing, safety trips, shaping chain,
 logging. The control logic (state machine, hold law, reading, learner, assist law)
@@ -56,6 +56,7 @@ EVERY WRITE (nothing else; no gains, no save_config):
 RUN (from the repo root):
   sudo chrt -f 80 taskset -c 3 ~/projects/bear_controller/venv/bin/python3 \\
       -m main_controller.run_v2 --level L3 --cap-a 5.5 --alpha 0 --wearer sam [--run-s 60]
+      [--target-vest 152,160]   (live readout of the vest angle; --no-display to turn it off)
   bench: ... --level L1 --cap-a 5.5 --bench --bench-angles 80,88,94 \\
       --payload-kg 1.137 --payload-r-m 0.213 --payload-angle-deg -29.7
 LEARNER CARRY-OVER (worn): identification needs two accepted ~24 s readings, more than
@@ -101,6 +102,9 @@ BENCH_POS_ERR_DEG = 5.0
 BENCH_RUN_CAP_S = 300.0
 BENCH_KP, BENCH_KI, BENCH_KD = 40.0, 60.0, 1.5
 READ_EXC = (struct.error, IndexError, ValueError, TypeError)   # PyBEAR on malformed bytes
+RESET_TRIES, RESET_GAP_S = 3, 0.005           # exit writes: retries, spacing (Nov 14)
+DISPLAY_PATH = '/dev/tty'                     # live readout (Nov 14): its own open
+DISPLAY_EVERY = 100                           # cycles: 5 Hz
 
 COLUMNS = ['t', 'loop_dt', 'act_deg', 'vest_deg', 'vel_reg', 'vel', 'acc', 'iq', 'iq_sent',
            'u_req', 'u_out', 'derate', 'temp_w', 'temp_p', 'err', 'state', 'bench_phase']
@@ -156,6 +160,9 @@ def parse_args(argv):
     ap.add_argument('--fresh-learner', action='store_true',
                     help='worn: ignore today\'s learner file and start empty')
     ap.add_argument('--note', default='')
+    ap.add_argument('--target-vest', default='',
+                    help='LO,HI vest deg: the live readout says LOW / OK / HIGH against it')
+    ap.add_argument('--no-display', action='store_true', help='no live readout')
     ap.add_argument('--bench', action='store_true')
     ap.add_argument('--bench-angles', default='', help='bench: actuator deg, 78-98')
     ap.add_argument('--bench-hold-s', type=float, default=32.0)
@@ -192,6 +199,15 @@ def parse_args(argv):
             ap.error(f"--run-s must be 1-{P.RUN_CAP_WORN_S:g}")
         if not a.wearer or not a.wearer.replace('_', '').isalnum():
             ap.error("worn runs need --wearer (letters, digits, _): it names the learner file")
+    a.target = None
+    if a.target_vest:
+        try:
+            lo, hi = (float(x) for x in a.target_vest.split(','))
+        except ValueError:
+            ap.error('--target-vest must be LO,HI (vest deg)')
+        if not 90.0 <= lo < hi <= 190.0:
+            ap.error('--target-vest must be LO,HI with 90 <= LO < HI <= 190')
+        a.target = (lo, hi)
     a.i_limit = round(a.cap_a + P.LIMIT_ABOVE_CAP_A, 3)
     a.trip3 = a.cap_a + P.TRIP_3X_ABOVE_CAP_A
     a.trip1 = a.cap_a + P.TRIP_1X_ABOVE_CAP_A
@@ -228,6 +244,8 @@ class Run:
         self.limit_written = False
         self.limit_restored = False
         self.t0 = time.monotonic()
+        self.disp_fd = None
+        self.ncyc = self.n_read = self.n_acc = 0
 
     def log(self, row):
         if self.n < len(self.buf):
@@ -341,6 +359,7 @@ class Run:
     # -- the loop -----------------------------------------------------------------
     def run(self):
         a, iface = self.a, self.iface
+        self.display_open()
         self.armed = True                     # from here on, exit must disable + disarm
         wd = iface.configure_watchdog(WATCHDOG_TIMEOUT_MS)
         self.limit_written = True
@@ -419,6 +438,9 @@ class Run:
                 if cstate not in (P.IDLE, P.LIFT, P.SETTLE, P.HOLD, P.LOWER):
                     raise Trip(f"controller state invalid: {cstate!r}")
                 for ev in out.events:
+                    if ev[0] == 'reading':
+                        self.n_read += 1
+                        self.n_acc += bool(ev[1].get('accepted'))
                     self.events.append((round(t, 4),) + tuple(ev))
                 cstate_eff = cstate
                 clog = out.log
@@ -460,6 +482,10 @@ class Run:
                 row += list(clog) if (not fading and bphase in ('-', 'ctrl')) \
                     else [np.nan] * len(self.fields)
             self.log(row)
+            self.ncyc += 1
+            if self.disp_fd is not None and self.ncyc % DISPLAY_EVERY == 0:
+                self.display(row, cstate_eff, clog if (not fading and bphase in ('-', 'ctrl'))
+                             else None)
             # ---- trips -----------------------------------------------------------------
             if iface.watchdog_tripped(err):
                 raise Trip(f"watchdog / e-stop bit (error {hex(err)})")
@@ -494,6 +520,49 @@ class Run:
                 time.sleep(s)
             else:
                 nxt = time.monotonic()
+
+    # -- live readout (Nov 14, Sam's request) ------------------------------------------
+    # One line, rewritten in place 5 times a second. Written to its OWN non-blocking open of
+    # the terminal: a full or stalled terminal drops a frame, it can never hold up the loop
+    # (the 10 ms gap trip). No terminal -> no readout, the run is unaffected.
+    def display_open(self):
+        if self.a.no_display:
+            return
+        try:
+            self.disp_fd = os.open(DISPLAY_PATH, os.O_WRONLY | os.O_NONBLOCK | os.O_NOCTTY)
+        except OSError:
+            self.disp_fd = None
+
+    def display(self, row, cstate, clog):
+        try:
+            vest, u = row[3], row[10]
+            tgt = ''
+            if self.a.target:
+                lo, hi = self.a.target
+                tgt = ('  LOW ' if vest < lo else '  HIGH' if vest > hi else '  OK  ') + \
+                    f'[{lo:g}-{hi:g}]'
+            cyc = ''
+            if clog and 'creep_cycle' in self.fields and cstate == P.HOLD:
+                k = clog[self.fields.index('creep_cycle')]
+                if k == k:
+                    cyc = f' creep {int(k)}/6' if k <= 6 else ' creep done'
+            line = (f'\r vest {vest:6.1f} deg{tgt}  {cstate:<6}{cyc:<11}  torque {u:4.2f} N m'
+                    f'  readings {self.n_acc}/{self.n_read} ok   ')
+            os.write(self.disp_fd, line.encode())
+        except Exception:                       # noqa: BLE001  (the readout must never end a run)
+            pass
+
+    def display_close(self):
+        if self.disp_fd is not None:
+            try:
+                os.write(self.disp_fd, b'\n')
+            except OSError:
+                pass
+            try:
+                os.close(self.disp_fd)
+            except OSError:
+                pass
+            self.disp_fd = None
 
     def meas(self, t, dt, act_deg, vel, acc, state, u_out, derate):
         return dict(t=t, dt=dt, act_deg=act_deg, vest_deg=act_deg + PHI_DEG, vel=vel, acc=acc,
@@ -550,26 +619,42 @@ def shutdown(run):
         return                                     # a refusal before arming writes nothing
     ok = iface.disable()
     if ok:
-        iface.bear.set_watchdog_timeout((iface.id, 0))
-        (wd,), _ = iface.bear.get_watchdog_timeout(iface.id)[0]
+        # Nov 14 (W3): these writes were lost in 2 of 6 worn runs; retry each up to
+        # RESET_TRIES times, spaced by a read and RESET_GAP_S (never back-to-back)
+        wd, tries = None, 0
+        for tries in range(1, RESET_TRIES + 1):
+            iface.bear.set_watchdog_timeout((iface.id, 0))
+            time.sleep(RESET_GAP_S)
+            (wd,), _ = iface.bear.get_watchdog_timeout(iface.id)[0]
+            if wd == 0:
+                break
         run.footer.append(f"disable confirmed attempts={iface.last_disable_attempts} "
-                          f"ms={iface.last_disable_ms}; watchdog reset to {wd} us")
+                          f"ms={iface.last_disable_ms}; watchdog reset to {wd} us "
+                          f"(attempts={tries})")
         if wd != 0:
             msg = (f"WATCHDOG RESET NOT CONFIRMED (reads {wd}); the actuator is disabled, but "
                    f"power-cycle it before any other script")
             print(f"\n{msg}")
             run.footer.append(msg)
-            run.end_reason = f"EXIT NOT CLEAN (watchdog reads {wd}) after: {run.end_reason}" 
+            run.end_reason = f"EXIT NOT CLEAN (watchdog reads {wd}) after: {run.end_reason}"
         if run.limit_written:
-            try:
-                rb = iface.set_current_limit(P.I_MAX_RESTORE_A)
-                run.limit_restored = True
-                run.footer.append(f"limit_i_max restored to {rb} A")
-            except Exception as e:                 # noqa: BLE001
-                msg = (f"limit_i_max NOT restored ({e}); power-cycle the actuator before any "
-                       f"other script")
+            err_last = None
+            for tries in range(1, RESET_TRIES + 1):
+                try:
+                    rb = iface.set_current_limit(P.I_MAX_RESTORE_A)
+                    run.limit_restored = True
+                    run.footer.append(f"limit_i_max restored to {rb} A (attempts={tries})")
+                    break
+                except Exception as e:             # noqa: BLE001
+                    err_last = e
+                    time.sleep(RESET_GAP_S)
+            if not run.limit_restored:
+                msg = (f"limit_i_max NOT restored after {RESET_TRIES} tries ({err_last}); "
+                       f"power-cycle the actuator before any other script")
                 print(f"\n{msg}")
                 run.footer.append(msg)
+                if not run.end_reason.startswith(('DISABLE', 'EXIT')):
+                    run.end_reason = f"EXIT NOT CLEAN (limit_i_max) after: {run.end_reason}"
     else:
         msg = ("DISABLE NOT CONFIRMED -- watchdog LEFT ARMED (trips in ~10 ms with no traffic). "
                "CUT ACTUATOR POWER and check it before anything else."
@@ -619,6 +704,7 @@ def main(argv=None):
         import traceback
         traceback.print_exc()
     finally:
+        run.display_close()
         try:
             shutdown(run)
         finally:

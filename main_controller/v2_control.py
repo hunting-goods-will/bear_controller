@@ -1,6 +1,6 @@
-"""Controller v2 control logic (V2_ARCHITECTURE v1.4 §4-§7). PURE: no bus, no I/O, no clock.
+"""Controller v2 control logic (V2_ARCHITECTURE v1.5 §4-§7). PURE: no bus, no I/O, no clock.
 
-INTERFACE CONTRACT (fixed by run_v2.py; written Nov 11 by Opus, implemented by Fable; V2 v1.4)
+INTERFACE CONTRACT (fixed by run_v2.py; written Nov 11 by Opus, implemented by Fable; V2 v1.5)
 --------------------------------------------------------------------------------------------
 run_v2.py owns: the bus, sensing (position-derived velocity/acceleration), every V2 §8
 trip, the shaping chain (rate limit on the final output, taper, thermal derate, command
@@ -73,7 +73,7 @@ import math
 from collections import deque, namedtuple
 
 from main_controller import v2_params as P
-from main_controller.controller import blend
+from main_controller.controller import blend, KT
 
 Out = namedtuple('Out', 'tau state log events')
 
@@ -191,17 +191,27 @@ class Learner:
 
     # -- what the assist and the hold ceiling use --------------------------------------------
     def A_used(self):
-        """min(A_id - OFFSET, A_last from (u - margin)), capped; None while unidentified."""
-        if not self.level or self.A_id is None or self.last is None:
+        """Identified: min(A_id - OFFSET, A_last from (u - margin)) on that level, capped.
+        Unidentified with a reading (L1 fallback, Nov 14, Project doc L1_FALLBACK): A from the
+        latest reading minus the margin, on the L1 table -- a lower bound on R at vest
+        105-150 for any in-scope level. No reading: None."""
+        if self.last is None:
             return None
+        if not self.level or self.A_id is None:
+            return min(P.arm_value(self.last[1] - P.FAST_MARGIN_READING_NM, P.LEVELS[0],
+                                   self.last[0]), P.A_CAP_NM)
         a_last = P.arm_value(self.last[1] - P.FAST_MARGIN_READING_NM, self.level, self.last[0])
         return min(self.A_id - P.OFFSET_NM, a_last, P.A_CAP_NM)
+
+    def model_level(self):
+        """The table R_hat uses: the identified level, else L1 if there is a reading."""
+        return self.level if self.level else P.LEVELS[0]
 
     def R_hat(self, vest_deg):
         a = self.A_used()
         if a is None:
             return P.residual_model(P.A_LOW_NM, P.LEVELS[-1], vest_deg)
-        return P.residual_model(a, self.level, vest_deg)
+        return P.residual_model(a, self.model_level(), vest_deg)
 
 
 # =============================================================================================
@@ -284,14 +294,21 @@ class Controller:
         self.read_done = False
 
     def _ceiling(self, m):
-        """Active hold ceiling, N m (V2 §5 / §6.1 check 5)."""
-        eff = P.effective_ceiling(self.anchor + self.amp, self.cap_a, m['derate'])
+        """(request limit, delivered limit), N m (V2 §5 / §6.1 check 5; Nov 14 fix W2).
+
+        The REQUEST is limited to cap x KT, and after identification to R_hat + f + 1.0.
+        No taper and no thermal derate here: run_v2 applies both to the output ONCE
+        (before Nov 14 both were applied twice inside the taper band: 1.30 vs 1.92 N m).
+        The DELIVERED limit is what run_v2 can put out at this angle and temperature:
+        taper(now) x derate x the request limit. Check 5 is judged against it."""
+        req = self.cap_a * KT
         if self.learner.level:
             idc = (self.learner.R_hat(self.anchor)
                    + float(P.friction(self.learner.level, self.anchor))
                    + P.HOLD_CEILING_MARGIN_NM)
-            return max(0.0, min(eff, idc))
-        return max(0.0, eff)
+            req = min(req, idc)
+        req = max(0.0, req)
+        return req, req * P.taper_up(m['act_deg']) * m['derate']
 
     # -- bench hooks -------------------------------------------------------------------------
     def bench_begin_hold(self, m):
@@ -417,7 +434,7 @@ class Controller:
         self.ff = min(self.ff + step, max(self.ff - step, ff_t))
         ff = self.ff
         e = (sp - vest) * D2R                           # rad, + = arm below the setpoint
-        ceiling = self._ceiling(m)
+        ceiling, delivered = self._ceiling(m)
 
         # integral: its input saturates INTEG_SAT_BELOW_DEG below the setpoint (bounds what a
         # slow lowering can wind up before the 2 deg release; v1.3's freeze beyond 0.3 deg
@@ -429,7 +446,7 @@ class Controller:
         raw = P.KP * e + self.integ - P.KD * m['vel'] + ff
         tau = min(max(raw, 0.0), ceiling)
 
-        self.sp, self.e_deg, self.ceiling = sp, e / D2R, ceiling
+        self.sp, self.e_deg, self.ceiling = sp, e / D2R, delivered
         k = int(tau_c * P.CREEP_HZ)                     # 0-based creep cycle
         self.cyc = float(k + 1)
         first, n = P.CREEP_CYCLES_DISCARD, P.CREEP_CYCLES_READ
@@ -445,16 +462,19 @@ class Controller:
                     c.sd += m['u_meas']
                     c.nd += 1
                 c.hi, c.lo = max(c.hi, vest), min(c.lo, vest)
-                if max(tau, m['u_prev']) > ceiling - P.HEADROOM_NM:
+                # check 5 (Nov 14): the request touching its limit (the hold ceiling), or
+                # the torque actually delivered touching what run_v2 can deliver here
+                if (tau > ceiling - P.HEADROOM_NM
+                        or m['u_prev'] > delivered - P.HEADROOM_NM):
                     c.headroom_bad = True
             elif k >= first + n:
                 self.read_done = True
                 self._finish_reading(ev)
                 # the learner may have just lowered R_hat: apply the new ceiling this cycle
-                ceiling = self._ceiling(m)
+                ceiling, delivered = self._ceiling(m)
                 self.integ = min(self.integ, ceiling)
                 tau = min(tau, ceiling)
-                self.ceiling = ceiling
+                self.ceiling = delivered
         return tau
 
     def _finish_reading(self, ev):
