@@ -40,6 +40,8 @@ A refused v2 worn run (140937, "watchdog read back 0 us, wrote 10000 us", no dat
 | `phase2/v2/v2_worn_L3_20261114_161327.csv.gz` | v2 worn | --level L3 --cap-a 5.5 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
 | `phase2/v2/v2_worn_L3_20261114_161451.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
 | `phase2/v2/v2_worn_L3_20261114_161601.csv.gz` | v2 worn | --level L3 --cap-a 8.0 --alpha 0 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | d3a468b clean |
+| `phase2/v2/v2_worn_L3_20261114_174448.csv.gz` | v2 worn (alpha 0.1, assist on) | --level L3 --cap-a 8.0 --alpha 0.1 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | 87a2e09 clean |
+| `phase2/v2/v2_worn_L3_20261114_174605.csv.gz` | v2 worn (alpha 0.1, assist on) | --level L3 --cap-a 8.0 --alpha 0.1 --wearer sam --run-s 60 --target-vest 152,160 | completed (60 s cap) | 87a2e09 clean |
 | `phase2/v2/learner_sam_20261114.json.gz` | learner state file (sam), saved after the last run | - | state after the last run of the day (2-point window, level 0, A_id null); overwritten Nov 14 evening, the earlier empty snapshot is in git history | - |
 
 ### 2026-11-14
